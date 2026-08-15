@@ -1,0 +1,22 @@
+name: Fetch PlayerLists ModDB metadata
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fetch-playerlists-moddb.yml'
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query ModDB API
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -fL 'https://mods.vintagestory.at/api/mod/playerlists' -o mod.json
+          python - <<'PY'
+          import json
+          data=json.load(open('mod.json'))
+          print(json.dumps(data, indent=2)[:50000])
+          PY
