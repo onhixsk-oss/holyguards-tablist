@@ -4,86 +4,80 @@ using Vintagestory.API.Server;
 
 namespace HolyguardsPlayerList;
 
-public sealed class HolyguardsPlayerListServerModSystem : ModSystem
+/// <summary>
+/// Server-side companion system bundled inside the same PlayerLists 2.3.7 ZIP.
+/// The original PlayerLists.dll remains byte-identical so the client can use the
+/// official PlayerLists 2.3.7 downloaded from Vintage Story ModDB and keep the
+/// exact protobuf/network schema.
+/// </summary>
+public sealed class HolyguardsPlayerListsEmbeddedServerSystem : ModSystem
 {
-    private const string DefaultLogo = "https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.jpg";
+    private const string LogoUrl = "https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.jpg";
 
     private ICoreServerAPI sapi;
-    private HolyguardsSettings settings;
-    private bool appliedOnce;
+    private bool applied;
 
-    // Run after PlayerLists so its _config object already exists.
+    // Apply after the original playerlist.PlayerList has created its config.
     public override double ExecuteOrder() => 999.0;
 
     public override void StartServerSide(ICoreServerAPI api)
     {
         sapi = api;
-        settings = api.LoadModConfig<HolyguardsSettings>("holyguardstablist.json") ?? new HolyguardsSettings();
-        api.StoreModConfig(settings, "holyguardstablist.json");
-
-        ApplyBranding();
-        api.Event.RegisterCallback(_ => ApplyBranding(), 1000);
-
-        api.Logger.Notification("[holyguardstablist] Server-only Holyguards branding bridge active. Clients only need original PlayerLists.");
+        Apply();
+        api.Event.RegisterCallback(_ => Apply(), 1000);
     }
 
-    private void ApplyBranding()
+    private void Apply()
     {
+        if (applied || sapi == null) return;
+
         try
         {
             ModSystem original = sapi.ModLoader.GetModSystem("playerlist.PlayerList");
             if (original == null)
             {
-                if (!appliedOnce)
-                {
-                    sapi.Logger.Warning("[holyguardstablist] Original PlayerLists mod system not found. Install original PlayerLists 2.3.7 on the server.");
-                }
+                sapi.Logger.Warning("[playerlists-holyguards] Original PlayerLists system not ready yet.");
                 return;
             }
 
-            FieldInfo configField = original.GetType().GetField("_config", BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo configField = original.GetType().GetField(
+                "_config",
+                BindingFlags.Instance | BindingFlags.NonPublic
+            );
+
             object config = configField?.GetValue(original);
             if (config == null)
             {
-                if (!appliedOnce)
-                {
-                    sapi.Logger.Warning("[holyguardstablist] PlayerLists config object is not ready yet.");
-                }
+                sapi.Logger.Warning("[playerlists-holyguards] Original PlayerLists config not ready yet.");
                 return;
             }
 
-            SetProperty(config, "Logo", string.IsNullOrWhiteSpace(settings.Logo) ? DefaultLogo : settings.Logo);
-            SetProperty(config, "Header", settings.Header);
-            SetProperty(config, "Footer", settings.Footer);
-            SetProperty(config, "Thresholds", settings.Thresholds ?? new[] { 100, 250, 500 });
-            SetProperty(config, "MaxNameLength", settings.MaxNameLength);
+            Set(config, "Logo", LogoUrl);
+            Set(config, "Header", "HOLYGUARDS");
+            Set(config, "Footer", null);
+            Set(config, "Thresholds", new[] { 100, 250, 500 });
+            Set(config, "MaxNameLength", 20);
 
-            if (!appliedOnce)
-            {
-                appliedOnce = true;
-                sapi.Logger.Notification("[holyguardstablist] Holyguards branding applied to original PlayerLists server config.");
-                sapi.Logger.Notification("[holyguardstablist] Client dependency remains original PlayerLists from ModDB; this Holyguards mod is server-only.");
-            }
+            applied = true;
+            sapi.Logger.Notification("[playerlists-holyguards] Holyguards branding embedded into PlayerLists 2.3.7 server config.");
+            sapi.Logger.Notification("[playerlists-holyguards] Clients remain compatible with the official PlayerLists 2.3.7 from ModDB.");
         }
         catch (Exception e)
         {
-            sapi.Logger.Error("[holyguardstablist] Could not apply PlayerLists branding: {0}", e);
+            sapi.Logger.Error("[playerlists-holyguards] Failed to apply embedded branding: {0}", e);
         }
     }
 
-    private static void SetProperty(object target, string name, object value)
+    private static void Set(object target, string propertyName, object value)
     {
-        PropertyInfo property = target.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        if (property == null || !property.CanWrite) return;
-        property.SetValue(target, value);
-    }
-}
+        PropertyInfo property = target.GetType().GetProperty(
+            propertyName,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+        );
 
-public sealed class HolyguardsSettings
-{
-    public string Logo { get; set; } = "https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.jpg";
-    public string Header { get; set; } = "HOLYGUARDS";
-    public string Footer { get; set; } = null;
-    public int[] Thresholds { get; set; } = new[] { 100, 250, 500 };
-    public int MaxNameLength { get; set; } = 20;
+        if (property?.CanWrite == true)
+        {
+            property.SetValue(target, value);
+        }
+    }
 }
