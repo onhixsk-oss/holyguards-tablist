@@ -69,7 +69,7 @@ jobs:
           s = s.replace('public string? Logo { get; set; } = "holyguardstablist:textures/vs_logo.png";',
                         'public string? Logo { get; set; } = "holyguardstablist:textures/holyguards.png";')
           s = s.replace('public string? Header { get; set; }',
-                        'public string? Header { get; set; } = "HOLYGUARDS  •  {CurPlayers}/{MaxPlayers}"')
+                        'public string? Header { get; set; } = "HOLYGUARDS  •  {CurPlayers}/{MaxPlayers}";')
           cfg.write_text(s, encoding='utf-8')
 
           # Remove obsolete migration to the old PlayerLists logo and move the HUD a little higher.
