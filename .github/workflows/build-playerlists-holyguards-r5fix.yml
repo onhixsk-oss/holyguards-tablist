@@ -19,61 +19,21 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Repair hosted logo to real PNG
+      - name: Verify public Holyguards PNG
         shell: bash
         run: |
           set -euxo pipefail
           python -m pip install --quiet pillow
-          python - <<'PY'
-          from PIL import Image, ImageFile
-          from pathlib import Path
-          ImageFile.LOAD_TRUNCATED_IMAGES = True
-          src = Path('assets/PlayerLists_Holyguards_logo_300x200.jpg')
-          dst = Path('assets/PlayerLists_Holyguards_logo_300x200.png')
-          im = Image.open(src)
-          im.load()
-          im = im.convert('RGBA').resize((300, 200), Image.Resampling.LANCZOS)
-          im.save(dst, 'PNG')
-          check = Image.open(dst)
-          check.load()
-          assert check.format == 'PNG'
-          assert check.size == (300, 200)
-          print('PNG OK', check.size, check.mode)
-          PY
-          file assets/PlayerLists_Holyguards_logo_300x200.png
-          git config user.name 'Holyguards Build Bot'
-          git config user.email 'actions@users.noreply.github.com'
-          git add assets/PlayerLists_Holyguards_logo_300x200.png
-          if ! git diff --cached --quiet; then
-            git commit -m 'Add repaired PNG PlayerLists Holyguards logo'
-            git push
-          fi
-
-      - name: Verify public PNG
-        shell: bash
-        run: |
-          set -euxo pipefail
           URL='https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.png'
-          for i in 1 2 3 4 5 6; do
-            if curl -fL --retry 2 "$URL" -o logo.png; then
-              if python - <<'PY'
-          from PIL import Image
-          im = Image.open('logo.png')
-          im.load()
-          assert im.format == 'PNG'
-          assert im.size == (300, 200)
-          print('Public logo OK:', im.format, im.size)
-          PY
-              then break; fi
-            fi
-            sleep 2
-          done
+          curl -fL --retry 5 --retry-delay 2 "$URL" -o logo.png
+          file logo.png
           python - <<'PY'
           from PIL import Image
           im = Image.open('logo.png')
           im.load()
-          assert im.format == 'PNG'
-          assert im.size == (300, 200)
+          assert im.format == 'PNG', im.format
+          assert im.size == (300, 200), im.size
+          print('Public logo OK:', im.format, im.size, im.mode)
           PY
 
       - name: Download official PlayerLists 2.3.7 from Vintage Story ModDB
@@ -99,7 +59,6 @@ jobs:
           using Mono.Cecil.Cil;
 
           const string LogoUrl = "https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.png";
-          const string HeaderText = "HOLYGUARDS";
 
           if (args.Length != 2) throw new ArgumentException("input output");
           using var asm = AssemblyDefinition.ReadAssembly(args[0], new ReaderParameters { ReadSymbols = false });
@@ -108,9 +67,8 @@ jobs:
           var config = module.Types.First(t => t.FullName == "playerlists.configuration.Config");
           var configField = playerList.Fields.First(f => f.Name == "_config");
           var logoSetter = config.Properties.First(p => p.Name == "Logo").SetMethod ?? throw new InvalidOperationException("Logo setter missing");
-          var headerSetter = config.Properties.First(p => p.Name == "Header").SetMethod ?? throw new InvalidOperationException("Header setter missing");
 
-          static void InjectAfter(MethodDefinition method, Instruction anchor, FieldDefinition configField, MethodReference logoSetter, MethodReference headerSetter)
+          static void InjectSetLogoAfter(MethodDefinition method, Instruction anchor, FieldDefinition configField, MethodReference logoSetter)
           {
               var il = method.Body.GetILProcessor();
               var cursor = anchor;
@@ -119,40 +77,29 @@ jobs:
               Add(il.Create(OpCodes.Ldfld, configField));
               Add(il.Create(OpCodes.Ldstr, LogoUrl));
               Add(il.Create(OpCodes.Callvirt, logoSetter));
-              Add(il.Create(OpCodes.Ldarg_0));
-              Add(il.Create(OpCodes.Ldfld, configField));
-              Add(il.Create(OpCodes.Ldstr, HeaderText));
-              Add(il.Create(OpCodes.Callvirt, headerSetter));
               method.Body.MaxStackSize = Math.Max(method.Body.MaxStackSize, 2);
           }
 
           var reload = playerList.Methods.First(m => m.Name == "ReloadConfig");
           var reloadStore = reload.Body.Instructions.First(i => i.OpCode == OpCodes.Stfld && i.Operand is FieldReference fr && fr.Name == "_config");
-          InjectAfter(reload, reloadStore, configField, logoSetter, headerSetter);
+          InjectSetLogoAfter(reload, reloadStore, configField, logoSetter);
 
           var send = playerList.Methods.First(m => m.Name == "SendConfigToPlayer");
           var sendIl = send.Body.GetILProcessor();
           var first = send.Body.Instructions.First();
-          var a1 = sendIl.Create(OpCodes.Ldarg_0);
-          var a2 = sendIl.Create(OpCodes.Ldfld, configField);
-          var a3 = sendIl.Create(OpCodes.Ldstr, LogoUrl);
-          var a4 = sendIl.Create(OpCodes.Callvirt, logoSetter);
-          var a5 = sendIl.Create(OpCodes.Ldarg_0);
-          var a6 = sendIl.Create(OpCodes.Ldfld, configField);
-          var a7 = sendIl.Create(OpCodes.Ldstr, HeaderText);
-          var a8 = sendIl.Create(OpCodes.Callvirt, headerSetter);
-          sendIl.InsertBefore(first, a1);
-          sendIl.InsertAfter(a1, a2);
-          sendIl.InsertAfter(a2, a3);
-          sendIl.InsertAfter(a3, a4);
-          sendIl.InsertAfter(a4, a5);
-          sendIl.InsertAfter(a5, a6);
-          sendIl.InsertAfter(a6, a7);
-          sendIl.InsertAfter(a7, a8);
+          var a = sendIl.Create(OpCodes.Ldarg_0);
+          var b = sendIl.Create(OpCodes.Ldfld, configField);
+          var c = sendIl.Create(OpCodes.Ldstr, LogoUrl);
+          var d = sendIl.Create(OpCodes.Callvirt, logoSetter);
+          sendIl.InsertBefore(first, a);
+          sendIl.InsertAfter(a, b);
+          sendIl.InsertAfter(b, c);
+          sendIl.InsertAfter(c, d);
           send.Body.MaxStackSize = Math.Max(send.Body.MaxStackSize, 2);
 
           asm.Write(args[1], new WriterParameters { WriteSymbols = false });
-          Console.WriteLine("Patched logo and header without changing network schema");
+          Console.WriteLine("Patched ReloadConfig and SendConfigToPlayer logo only; protobuf schema unchanged");
+          Console.WriteLine(LogoUrl);
           CS
           dotnet build patcher/patcher.csproj -c Release
 
@@ -165,7 +112,6 @@ jobs:
           rm official/PlayerLists.original.dll
           test "$(find official -maxdepth 1 -type f -name '*.dll' | wc -l)" -eq 1
           strings -el official/PlayerLists.dll | grep -F 'PlayerLists_Holyguards_logo_300x200.png'
-          strings -el official/PlayerLists.dll | grep -F 'HOLYGUARDS'
           python - <<'PY'
           import json
           with open('official/modinfo.json', encoding='utf-8-sig') as f:
@@ -179,6 +125,7 @@ jobs:
           (cd official && zip -qr ../PlayerLists-2.3.7-Holyguards-r5fix.zip .)
           unzip -t PlayerLists-2.3.7-Holyguards-r5fix.zip
           test "$(unzip -Z1 PlayerLists-2.3.7-Holyguards-r5fix.zip | grep -Ei '\.dll$' | wc -l)" -eq 1
+          sha256sum PlayerLists-2.3.7-Holyguards-r5fix.zip
 
       - uses: actions/upload-artifact@v4
         with:
