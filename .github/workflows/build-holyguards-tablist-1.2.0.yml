@@ -20,30 +20,120 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Download Vintage Story 1.22.4 server assemblies
+      - name: Download exact official PlayerLists 2.3.7
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p "$GITHUB_WORKSPACE/vs"
-          curl -fL "https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_1.22.4.tar.gz" -o "$GITHUB_WORKSPACE/vs.tar.gz"
-          tar -xzf "$GITHUB_WORKSPACE/vs.tar.gz" -C "$GITHUB_WORKSPACE/vs"
-          test -f "$GITHUB_WORKSPACE/vs/VintagestoryAPI.dll"
+          curl -fL 'https://moddbcdn.vintagestory.at/PlayerLists-2.3.7_dd7da4fa71f8bd4a10f1e0c0fc54f608.zip?dl=PlayerLists-2.3.7.zip' -o official.zip
+          mkdir official
+          unzip -q official.zip -d official
+          test -f official/PlayerLists.dll
+          sha256sum official/PlayerLists.dll
 
-      - name: Prepare standalone source
+      - name: Build standalone IL patcher
         shell: bash
         run: |
           set -euxo pipefail
-          git clone --depth 1 https://github.com/BillysArchive/VS-PlayerList.git upstream
+          dotnet new console -n patcher -f net10.0
+          dotnet add patcher/patcher.csproj package Mono.Cecil --version 0.11.6
+          cat > patcher/Program.cs <<'CS'
+          using System;
+          using System.Collections.Generic;
+          using System.Linq;
+          using Mono.Cecil;
+          using Mono.Cecil.Cil;
 
-          # Make this a genuinely separate mod: unique namespace, asset domain,
-          # hotkey code and network channel via Mod.Info.ModID.
-          find upstream/src -type f -name '*.cs' -print0 | xargs -0 sed -i 's/playerlist/holyguardstablist/g'
+          const string NewModId = "holyguardstablist";
+          const string NewAssetDomain = "holyguardstablist";
+          const string LogoAsset = "holyguardstablist:textures/holyguards.png";
 
-          mv upstream/resources/assets/playerlist upstream/resources/assets/holyguardstablist
-          rm -f upstream/resources/assets/holyguardstablist/textures/vs_logo.png
-          cp assets/PlayerLists_Holyguards_logo_300x200.png upstream/resources/assets/holyguardstablist/textures/holyguards.png
+          if (args.Length != 2) throw new ArgumentException("input output");
+          using var asm = AssemblyDefinition.ReadAssembly(args[0], new ReaderParameters { ReadSymbols = false });
+          var module = asm.MainModule;
 
-          cat > upstream/resources/modinfo.json <<'JSON'
+          asm.Name.Name = "HolyguardsTablist";
+          module.Name = "HolyguardsTablist.dll";
+
+          IEnumerable<TypeDefinition> Types(IEnumerable<TypeDefinition> roots)
+          {
+              foreach (var t in roots)
+              {
+                  yield return t;
+                  foreach (var n in Types(t.NestedTypes)) yield return n;
+              }
+          }
+
+          var allTypes = Types(module.Types).ToList();
+          foreach (var type in allTypes)
+          {
+              if (type.Namespace == "playerlists" || type.Namespace.StartsWith("playerlists."))
+              {
+                  type.Namespace = "holyguardstablist" + type.Namespace.Substring("playerlists".Length);
+              }
+          }
+
+          int stringsChanged = 0;
+          foreach (var type in allTypes)
+          foreach (var method in type.Methods)
+          {
+              if (!method.HasBody) continue;
+              foreach (var ins in method.Body.Instructions)
+              {
+                  if (ins.OpCode != OpCodes.Ldstr || ins.Operand is not string s) continue;
+                  string n = s;
+                  if (n == "playerlists") n = NewModId;
+                  if (n == "playerlist") n = NewAssetDomain;
+                  n = n.Replace("playerlists-server.json", "holyguardstablist-server.json");
+                  n = n.Replace("playerlists:", "holyguardstablist:");
+                  n = n.Replace("playerlist:", "holyguardstablist:");
+                  n = n.Replace("textures/vs_logo.png", "textures/holyguards.png");
+                  if (n != s) { ins.Operand = n; stringsChanged++; }
+              }
+          }
+
+          var playerList = allTypes.First(t => t.FullName == "holyguardstablist.PlayerList");
+          var config = allTypes.First(t => t.FullName == "holyguardstablist.configuration.Config");
+          var configField = playerList.Fields.First(f => f.Name == "_config");
+          var logoSetter = config.Properties.First(p => p.Name == "Logo").SetMethod ?? throw new InvalidOperationException("Logo setter missing");
+          var showPingSetter = config.Properties.First(p => p.Name == "ShowPing").SetMethod ?? throw new InvalidOperationException("ShowPing setter missing");
+          var send = playerList.Methods.First(m => m.Name == "SendConfigToPlayer");
+          var il = send.Body.GetILProcessor();
+          var first = send.Body.Instructions.First();
+
+          // Force bundled Holyguards branding into the server-pushed config.
+          var seq = new[] {
+              il.Create(OpCodes.Ldarg_0),
+              il.Create(OpCodes.Ldfld, configField),
+              il.Create(OpCodes.Ldstr, LogoAsset),
+              il.Create(OpCodes.Callvirt, logoSetter),
+              il.Create(OpCodes.Ldarg_0),
+              il.Create(OpCodes.Ldfld, configField),
+              il.Create(OpCodes.Ldc_I4_1),
+              il.Create(OpCodes.Callvirt, showPingSetter)
+          };
+          foreach (var ins in seq) il.InsertBefore(first, ins);
+          send.Body.MaxStackSize = Math.Max(send.Body.MaxStackSize, 2);
+
+          asm.Write(args[1], new WriterParameters { WriteSymbols = false });
+          Console.WriteLine($"Standalone patch complete. Renamed types: {allTypes.Count(t => t.Namespace.StartsWith("holyguardstablist"))}; strings changed: {stringsChanged}");
+          Console.WriteLine($"Forced logo: {LogoAsset}");
+          CS
+          dotnet build patcher/patcher.csproj -c Release
+
+      - name: Create clean standalone package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p package
+          dotnet patcher/bin/Release/net10.0/patcher.dll official/PlayerLists.dll package/HolyguardsTablist.dll
+
+          # Move the original assets into our own namespace and replace the VS logo.
+          mkdir -p package/assets
+          cp -R official/assets/playerlist package/assets/holyguardstablist
+          rm -f package/assets/holyguardstablist/textures/vs_logo.png
+          cp assets/PlayerLists_Holyguards_logo_300x200.png package/assets/holyguardstablist/textures/holyguards.png
+
+          cat > package/modinfo.json <<'JSON'
           {
             "type": "code",
             "name": "Holyguards Tablist",
@@ -55,76 +145,36 @@ jobs:
             "side": "Universal",
             "requiredOnClient": true,
             "requiredOnServer": true,
-            "dependencies": {
-              "game": "1.22.3"
-            }
+            "dependencies": { "game": "1.22.3" }
           }
           JSON
 
-          python - <<'PY'
-          from pathlib import Path
+          cp official/LICENSE package/LICENSE
+          cp official/modicon.png package/modicon.png
+          cat > package/README.md <<'TXT'
+          # Holyguards Tablist
 
-          cfg = Path('upstream/src/configuration/Config.cs')
-          s = cfg.read_text(encoding='utf-8-sig')
-          s = s.replace('public string? Logo { get; set; } = "holyguardstablist:textures/vs_logo.png";',
-                        'public string? Logo { get; set; } = "holyguardstablist:textures/holyguards.png";')
-          s = s.replace('public string? Header { get; set; }',
-                        'public string? Header { get; set; } = "HOLYGUARDS  •  {CurPlayers}/{MaxPlayers}";')
-          cfg.write_text(s, encoding='utf-8')
+          Standalone Holyguards player list for Vintage Story.
+          Hold TAB to display online players and ping.
 
-          # Remove obsolete migration to the old PlayerLists logo and move the HUD a little higher.
-          pl = Path('upstream/src/PlayerList.cs')
-          s = pl.read_text(encoding='utf-8-sig')
-          old = '''        if (_config.Logo == "https://i.imgur.com/gTAs0Il.png") {\n            _config.Logo = "holyguardstablist:textures/vs_logo.png";\n        }\n\n'''
-          s = s.replace(old, '')
-          pl.write_text(s, encoding='utf-8')
+          This package uses its own mod id, assembly name, code namespace, network channel,
+          config files and asset domain. It does not require the PlayerLists mod.
 
-          hud = Path('upstream/src/gui/PlayerListHud.cs')
-          s = hud.read_text(encoding='utf-8-sig').replace('fixedOffsetY = 100', 'fixedOffsetY = 55')
-          hud.write_text(s, encoding='utf-8')
-
-          proj = Path('upstream/PlayerList.csproj')
-          s = proj.read_text(encoding='utf-8-sig')
-          s = s.replace('<Version>2.3.4</Version>', '<Version>1.2.0</Version>\n        <AssemblyName>HolyguardsTablist</AssemblyName>')
-          s = s.replace('<Description>View the player list on Vintage Story servers</Description>', '<Description>Standalone Holyguards player list for Vintage Story</Description>')
-          proj.write_text(s, encoding='utf-8')
-          PY
-
-          # Add explicit credit while keeping upstream MIT license.
-          cat > upstream/CREDITS.txt <<'TXT'
+          Credits: based on the MIT-licensed PlayerLists project by William Blake Galbreath
+          (BillyGalbreath) and contributors. The upstream MIT license is included.
+          TXT
+          cat > package/CREDITS.txt <<'TXT'
           Holyguards Tablist
+          Holyguards standalone branding and packaging.
 
-          Standalone Holyguards branding and packaging by Holyguards.
-          Based on the MIT-licensed VS-PlayerList project by William Blake Galbreath / BillyGalbreath and contributors.
+          Based on the MIT-licensed PlayerLists project by William Blake Galbreath / BillyGalbreath and contributors.
           Upstream: https://github.com/BillysArchive/VS-PlayerList
-          The upstream MIT LICENSE is included in this package.
           TXT
 
-      - name: Build standalone DLL
-        shell: bash
-        run: |
-          set -euxo pipefail
-          dotnet build upstream/PlayerList.csproj -c Release -v:minimal -p:VINTAGE_STORY="$GITHUB_WORKSPACE/vs"
-
-      - name: Package clean ModDB release
-        shell: bash
-        run: |
-          set -euxo pipefail
-          OUTDIR="upstream/bin/Release"
-          test -f "$OUTDIR/HolyguardsTablist.dll"
-
-          mkdir -p package
-          cp "$OUTDIR/HolyguardsTablist.dll" package/HolyguardsTablist.dll
-          cp upstream/resources/modinfo.json package/modinfo.json
-          cp upstream/LICENSE package/LICENSE
-          cp upstream/CREDITS.txt package/CREDITS.txt
-          cp upstream/README.md package/README.md
-          cp upstream/resources/modicon.png package/modicon.png
-          cp -R upstream/resources/assets package/assets
-
-          # Absolutely no original PlayerLists DLL and no Vintage Story logo fallback.
           test ! -e package/PlayerLists.dll
           test ! -e package/assets/holyguardstablist/textures/vs_logo.png
+          test ! -e package/assets/playerlist
+          test -f package/HolyguardsTablist.dll
           test -f package/assets/holyguardstablist/textures/holyguards.png
           test "$(find package -type f -name '*.dll' | wc -l)" -eq 1
 
@@ -134,12 +184,9 @@ jobs:
           m=json.loads(Path('package/modinfo.json').read_text())
           assert m['modid']=='holyguardstablist'
           assert m['version']=='1.2.0'
-          assert m['requiredOnClient'] is True
-          assert m['requiredOnServer'] is True
-          dlls=list(Path('package').rglob('*.dll'))
-          assert [p.name for p in dlls]==['HolyguardsTablist.dll']
-          print('Identity OK:', m['modid'], m['version'])
-          print('DLL OK:', dlls[0])
+          assert m['requiredOnClient'] is True and m['requiredOnServer'] is True
+          assert [p.name for p in Path('package').rglob('*.dll')]==['HolyguardsTablist.dll']
+          print('Identity/package checks OK')
           PY
 
           (cd package && zip -qr ../holyguardstablist_1.2.0.zip .)
