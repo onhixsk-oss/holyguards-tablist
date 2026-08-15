@@ -15,10 +15,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup .NET 8
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Download Vintage Story 1.22.6 server assemblies
         shell: bash
@@ -58,7 +58,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p artifact
-          cp buildsrc/bin/Release/net8.0/HolyguardsPlayerList.dll artifact/HolyguardsPlayerList.dll
+          cp buildsrc/bin/Release/net10.0/HolyguardsPlayerList.dll artifact/HolyguardsPlayerList.dll
 
       - name: Upload DLL
         uses: actions/upload-artifact@v4
