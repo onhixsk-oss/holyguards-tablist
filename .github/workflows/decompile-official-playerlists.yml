@@ -1,0 +1,42 @@
+name: Decompile official PlayerLists 2.3.7
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/decompile-official-playerlists.yml'
+
+jobs:
+  decompile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Download official ModDB release
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -fL 'https://moddbcdn.vintagestory.at/PlayerLists-2.3.7_dd7da4fa71f8bd4a10f1e0c0fc54f608.zip?dl=PlayerLists-2.3.7.zip' -o playerlists.zip
+          unzip -l playerlists.zip
+          unzip -q playerlists.zip -d official
+          sha256sum official/PlayerLists.dll
+          file official/PlayerLists.dll
+      - name: Install ILSpy
+        shell: bash
+        run: |
+          dotnet tool install --global ilspycmd
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+      - name: Decompile
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          mkdir -p decompiled
+          ilspycmd -p -o decompiled official/PlayerLists.dll
+          find decompiled -type f -maxdepth 5 -print
+      - uses: actions/upload-artifact@v4
+        with:
+          name: official-playerlists-2.3.7-decompiled
+          path: decompiled
+          if-no-files-found: error
