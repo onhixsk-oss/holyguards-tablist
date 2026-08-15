@@ -1,283 +1,89 @@
 using System.Reflection;
-using Vintagestory.API.Client;
 using Vintagestory.API.Common;
+using Vintagestory.API.Server;
 
 namespace HolyguardsPlayerList;
 
-public sealed class HolyguardsPlayerListModSystem : ModSystem
+public sealed class HolyguardsPlayerListServerModSystem : ModSystem
 {
-    private HolyguardsPlayerListHud hud;
-    private bool originalSuppressed;
+    private const string DefaultLogo = "https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.jpg";
 
-    // Start after ordinary mods so the original PlayerLists HUD can be disabled if present.
+    private ICoreServerAPI sapi;
+    private HolyguardsSettings settings;
+    private bool appliedOnce;
+
+    // Run after PlayerLists so its _config object already exists.
     public override double ExecuteOrder() => 999.0;
 
-    public override void StartClientSide(ICoreClientAPI capi)
+    public override void StartServerSide(ICoreServerAPI api)
     {
-        SuppressOriginalPlayerLists(capi);
-        capi.Event.RegisterCallback(_ => SuppressOriginalPlayerLists(capi), 500);
+        sapi = api;
+        settings = api.LoadModConfig<HolyguardsSettings>("holyguardstablist.json") ?? new HolyguardsSettings();
+        api.StoreModConfig(settings, "holyguardstablist.json");
 
-        hud = new HolyguardsPlayerListHud(capi);
-        capi.Logger.Notification("[holyguardsplayerlist] Holyguards hold-TAB player list active.");
+        ApplyBranding();
+        api.Event.RegisterCallback(_ => ApplyBranding(), 1000);
+
+        api.Logger.Notification("[holyguardstablist] Server-only Holyguards branding bridge active. Clients only need original PlayerLists.");
     }
 
-    private void SuppressOriginalPlayerLists(ICoreClientAPI capi)
+    private void ApplyBranding()
     {
-        if (originalSuppressed) return;
-
         try
         {
-            ModSystem original = capi.ModLoader.GetModSystem("playerlist.PlayerList");
-            if (original == null) return;
+            ModSystem original = sapi.ModLoader.GetModSystem("playerlist.PlayerList");
+            if (original == null)
+            {
+                if (!appliedOnce)
+                {
+                    sapi.Logger.Warning("[holyguardstablist] Original PlayerLists mod system not found. Install original PlayerLists 2.3.7 on the server.");
+                }
+                return;
+            }
 
-            original.Dispose();
-            originalSuppressed = true;
-            capi.Logger.Notification("[holyguardsplayerlist] Original PlayerLists client HUD disabled for this session.");
+            FieldInfo configField = original.GetType().GetField("_config", BindingFlags.Instance | BindingFlags.NonPublic);
+            object config = configField?.GetValue(original);
+            if (config == null)
+            {
+                if (!appliedOnce)
+                {
+                    sapi.Logger.Warning("[holyguardstablist] PlayerLists config object is not ready yet.");
+                }
+                return;
+            }
+
+            SetProperty(config, "Logo", string.IsNullOrWhiteSpace(settings.Logo) ? DefaultLogo : settings.Logo);
+            SetProperty(config, "Header", settings.Header);
+            SetProperty(config, "Footer", settings.Footer);
+            SetProperty(config, "Thresholds", settings.Thresholds ?? new[] { 100, 250, 500 });
+            SetProperty(config, "MaxNameLength", settings.MaxNameLength);
+
+            if (!appliedOnce)
+            {
+                appliedOnce = true;
+                sapi.Logger.Notification("[holyguardstablist] Holyguards branding applied to original PlayerLists server config.");
+                sapi.Logger.Notification("[holyguardstablist] Client dependency remains original PlayerLists from ModDB; this Holyguards mod is server-only.");
+            }
         }
         catch (Exception e)
         {
-            capi.Logger.Warning("[holyguardsplayerlist] Could not disable original PlayerLists HUD: {0}", e.Message);
+            sapi.Logger.Error("[holyguardstablist] Could not apply PlayerLists branding: {0}", e);
         }
     }
 
-    public override void Dispose()
+    private static void SetProperty(object target, string name, object value)
     {
-        hud?.Dispose();
-        hud = null;
+        PropertyInfo property = target.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (property == null || !property.CanWrite) return;
+        property.SetValue(target, value);
     }
 }
 
-public sealed class HolyguardsPlayerListHud : HudElement
+public sealed class HolyguardsSettings
 {
-    private const double GuiWidth = 720.0;
-    private const double GuiHeight = 480.0;
-    private const double SourceWidth = 1536.0;
-    private const double Scale = GuiWidth / SourceWidth;
-    private const int MaxRows = 11;
-
-    // Horizontal separators in the source 1536x1024 Holyguards artwork.
-    private static readonly int[] RowLines =
-    {
-        405, 452, 496, 540, 586, 630, 675, 720, 765, 810, 853, 898
-    };
-
-    private readonly long tickListenerId;
-    private string lastSignature = string.Empty;
-
-    public HolyguardsPlayerListHud(ICoreClientAPI capi) : base(capi)
-    {
-        tickListenerId = capi.Event.RegisterGameTickListener(_ => UpdateList(), 750);
-        UpdateList(true);
-    }
-
-    private void UpdateList(bool force = false)
-    {
-        List<IPlayer> allPlayers = capi.World.AllOnlinePlayers
-            .Where(player => player != null)
-            .OrderBy(player => player.PlayerName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        string signature = BuildSignature(allPlayers);
-        if (!force && signature == lastSignature) return;
-        lastSignature = signature;
-
-        Compose(allPlayers);
-        TryOpen();
-    }
-
-    private static string BuildSignature(List<IPlayer> players)
-    {
-        return string.Join("|", players.Select(player =>
-        {
-            int ping = GetPingMs(player);
-            int pingBucket = ping < 0 ? -1 : ping / 25;
-            return $"{player.PlayerUID}:{player.PlayerName}:{GetRank(player)}:{pingBucket}";
-        }));
-    }
-
-    private void Compose(List<IPlayer> allPlayers)
-    {
-        ElementBounds root = new()
-        {
-            Alignment = EnumDialogArea.CenterTop,
-            BothSizing = ElementSizing.Fixed,
-            fixedWidth = GuiWidth,
-            fixedHeight = GuiHeight,
-            fixedOffsetY = 18
-        };
-
-        GuiComposer composer = capi.Gui
-            .CreateCompo("holyguardsplayerlist", root)
-            .BeginChildElements()
-            .AddImage(
-                ElementBounds.Fixed(0, 0, GuiWidth, GuiHeight),
-                new AssetLocation("holyguardsplayerlist", "textures/gui/tablist.png")
-            );
-
-        CairoFont nameFont = CairoFont.WhiteSmallText()
-            .WithFontSize(13f)
-            .WithOrientation(EnumTextOrientation.Center);
-
-        CairoFont rankFont = CairoFont.WhiteSmallText()
-            .WithFontSize(12f)
-            .WithOrientation(EnumTextOrientation.Center)
-            .WithColor(new[] { 0.96, 0.80, 0.42, 1.0 });
-
-        CairoFont pingFont = CairoFont.WhiteSmallText()
-            .WithFontSize(11f)
-            .WithOrientation(EnumTextOrientation.Center);
-
-        int regularRows = Math.Min(allPlayers.Count, MaxRows);
-        bool hasOverflow = allPlayers.Count > MaxRows;
-        if (hasOverflow) regularRows = MaxRows - 1;
-
-        for (int i = 0; i < regularRows; i++)
-        {
-            IPlayer player = allPlayers[i];
-            AddRow(
-                composer,
-                i,
-                player.PlayerName,
-                GetRank(player),
-                FormatPing(GetPingMs(player)),
-                nameFont,
-                rankFont,
-                pingFont
-            );
-        }
-
-        if (hasOverflow)
-        {
-            int remaining = allPlayers.Count - regularRows;
-            AddRow(
-                composer,
-                MaxRows - 1,
-                $"+{remaining} ďalších",
-                string.Empty,
-                string.Empty,
-                nameFont,
-                rankFont,
-                pingFont
-            );
-        }
-
-        SingleComposer = composer
-            .EndChildElements()
-            .Compose();
-    }
-
-    private static void AddRow(
-        GuiComposer composer,
-        int row,
-        string name,
-        string rank,
-        string ping,
-        CairoFont nameFont,
-        CairoFont rankFont,
-        CairoFont pingFont)
-    {
-        int top = RowLines[row];
-        int bottom = RowLines[row + 1];
-
-        double y = Px(top + 6);
-        double h = Math.Max(14, Px(bottom - top - 10));
-
-        // Source-art columns: HRÁČ 223-614, RANK 619-1044, PING 1049-1313.
-        ElementBounds nameBounds = ElementBounds.Fixed(Px(228), y, Px(382), h);
-        ElementBounds rankBounds = ElementBounds.Fixed(Px(624), y, Px(414), h);
-
-        // Leave the painted signal bars on the far-right side unobstructed.
-        ElementBounds pingBounds = ElementBounds.Fixed(Px(1055), y, Px(145), h);
-
-        composer.AddStaticText(Trim(name, 24), nameFont, nameBounds);
-        composer.AddStaticText(Trim(rank, 22), rankFont, rankBounds);
-        composer.AddStaticText(ping, pingFont, pingBounds);
-    }
-
-    private static double Px(double sourcePixels) => sourcePixels * Scale;
-
-    private static string Trim(string text, int max)
-    {
-        if (string.IsNullOrEmpty(text) || text.Length <= max) return text ?? string.Empty;
-        return text[..max] + "…";
-    }
-
-    private static string GetRank(IPlayer player)
-    {
-        try
-        {
-            string rank = player.Role?.Name;
-            return string.IsNullOrWhiteSpace(rank) ? string.Empty : rank;
-        }
-        catch
-        {
-            return string.Empty;
-        }
-    }
-
-    private static int GetPingMs(IPlayer player)
-    {
-        try
-        {
-            PropertyInfo prop = player.GetType().GetProperty(
-                "Ping",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-            );
-
-            object value = prop?.GetValue(player);
-            return value switch
-            {
-                float seconds => (int)Math.Round(seconds * 1000.0),
-                double seconds => (int)Math.Round(seconds * 1000.0),
-                int milliseconds => milliseconds,
-                _ => -1
-            };
-        }
-        catch
-        {
-            return -1;
-        }
-    }
-
-    private static string FormatPing(int ping) => ping < 0 ? "—" : $"{ping} ms";
-
-    private bool IsTabHeld()
-    {
-        bool[] keys = capi.Input.KeyboardKeyState;
-        int index = (int)GlKeys.Tab;
-        return keys != null && index >= 0 && index < keys.Length && keys[index];
-    }
-
-    public override bool ShouldReceiveRenderEvents() => IsTabHeld();
-
-    public override double InputOrder => 1.0999;
-    public override double DrawOrder => 0.8899;
-    public override float ZSize => 200F;
-
-    public override bool ShouldReceiveKeyboardEvents() => false;
-    public override void OnKeyDown(KeyEvent args) { }
-    public override void OnKeyPress(KeyEvent args) { }
-    public override void OnKeyUp(KeyEvent args) { }
-    public override bool OnEscapePressed() => false;
-    public override bool ShouldReceiveMouseEvents() => false;
-    public override void OnMouseDown(MouseEvent args) { }
-    public override void OnMouseUp(MouseEvent args) { }
-    public override void OnMouseMove(MouseEvent args) { }
-    public override void OnMouseWheel(MouseWheelEventArgs args) { }
-    public override bool OnMouseEnterSlot(ItemSlot slot) => false;
-    public override bool OnMouseLeaveSlot(ItemSlot itemSlot) => false;
-    public override bool CaptureAllInputs() => false;
-
-    public override bool TryClose() => false;
-    public override void Toggle() { }
-    public override void UnFocus() { }
-    public override void Focus() { }
-    public override bool Focused => false;
-    protected override void OnFocusChanged(bool on) => focused = false;
-
-    public override void Dispose()
-    {
-        base.Dispose();
-        capi.Event.UnregisterGameTickListener(tickListenerId);
-    }
+    public string Logo { get; set; } = "https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.jpg";
+    public string Header { get; set; } = "HOLYGUARDS";
+    public string Footer { get; set; } = null;
+    public int[] Thresholds { get; set; } = new[] { 100, 250, 500 };
+    public int MaxNameLength { get; set; } = 20;
 }
