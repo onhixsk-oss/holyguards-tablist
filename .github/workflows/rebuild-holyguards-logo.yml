@@ -1,0 +1,29 @@
+name: Rebuild Holyguards logo
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/rebuild-holyguards-logo.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rebuild binary PNG from chunks
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat tmp/logo64.part0 tmp/logo64.part1 tmp/logo64.part2 | base64 -d > assets/PlayerLists_Holyguards_logo_300x200.png
+          file assets/PlayerLists_Holyguards_logo_300x200.png
+          test "$(stat -c%s assets/PlayerLists_Holyguards_logo_300x200.png)" -eq 8833
+          test "$(sha256sum assets/PlayerLists_Holyguards_logo_300x200.png | cut -d' ' -f1)" = "85968f9109cf0063d0c838c0187a4fc02c200ae5c03acf1bacd81d221bd8bc97"
+          git config user.name 'Holyguards Build Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add assets/PlayerLists_Holyguards_logo_300x200.png
+          git commit -m 'Restore valid Holyguards PlayerLists artwork'
+          git push
