@@ -1,4 +1,4 @@
-name: Build PlayerLists Holyguards r4
+name: Build PlayerLists Holyguards r5
 
 on:
   workflow_dispatch:
@@ -6,22 +6,58 @@ on:
     paths:
       - '.github/workflows/build-playerlists-holyguards-final.yml'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
 
-      - name: Verify Holyguards logo URL
+      - name: Create real PNG logo and publish it
         shell: bash
         run: |
           set -euxo pipefail
-          curl -fL 'https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.jpg' -o holyguards-logo.jpg
-          test -s holyguards-logo.jpg
-          file holyguards-logo.jpg
-          test "$(wc -c < holyguards-logo.jpg)" -gt 10000
+          python -m pip install --quiet pillow
+          python - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+          src = Path('assets/PlayerLists_Holyguards_logo_300x200.jpg')
+          dst = Path('assets/PlayerLists_Holyguards_logo_300x200.png')
+          im = Image.open(src).convert('RGBA').resize((300, 200), Image.Resampling.LANCZOS)
+          im.save(dst, 'PNG', optimize=True)
+          print(dst, im.size)
+          PY
+          git config user.name 'Holyguards Build Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add assets/PlayerLists_Holyguards_logo_300x200.png
+          if ! git diff --cached --quiet; then
+            git commit -m 'Add PNG PlayerLists Holyguards logo'
+            git push
+          fi
+
+      - name: Verify Holyguards PNG URL
+        shell: bash
+        run: |
+          set -euxo pipefail
+          URL='https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.png'
+          for i in 1 2 3 4 5; do
+            if curl -fL --retry 2 "$URL" -o logo.png; then break; fi
+            sleep 2
+          done
+          file logo.png
+          python - <<'PY'
+          from PIL import Image
+          im = Image.open('logo.png')
+          assert im.format == 'PNG', im.format
+          assert im.size == (300, 200), im.size
+          print('Logo OK:', im.format, im.size)
+          PY
 
       - name: Download official PlayerLists 2.3.7 from Vintage Story ModDB
         shell: bash
@@ -33,7 +69,7 @@ jobs:
           test -f official/PlayerLists.dll
           sha256sum official/PlayerLists.dll
 
-      - name: Build IL patcher
+      - name: Build exact IL patcher
         shell: bash
         run: |
           set -euxo pipefail
@@ -45,67 +81,69 @@ jobs:
           using Mono.Cecil;
           using Mono.Cecil.Cil;
 
-          const string LogoUrl = "https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.jpg";
+          const string LogoUrl = "https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.png";
+          const string HeaderText = "HOLYGUARDS";
+
+          if (args.Length != 2) throw new ArgumentException("input output");
           var input = args[0];
           var output = args[1];
 
           using var asm = AssemblyDefinition.ReadAssembly(input, new ReaderParameters { ReadSymbols = false });
           var module = asm.MainModule;
-          var playerList = module.Types.First(t => t.FullName == "playerlists.PlayerList");
           var config = module.Types.First(t => t.FullName == "playerlists.configuration.Config");
-          var configField = playerList.Fields.First(f => f.Name == "_config");
-          var logoSetter = config.Properties.First(p => p.Name == "Logo").SetMethod
-              ?? throw new InvalidOperationException("Config.Logo setter not found");
 
-          static void InjectSetLogoAfter(MethodDefinition method, Instruction anchor, FieldDefinition configField, MethodDefinition logoSetter, string logoUrl)
+          static void ReturnConstantString(PropertyDefinition property, string value)
           {
-              var il = method.Body.GetILProcessor();
-              var cursor = anchor;
-              void Add(Instruction ins) { il.InsertAfter(cursor, ins); cursor = ins; }
-              Add(il.Create(OpCodes.Ldarg_0));
-              Add(il.Create(OpCodes.Ldfld, configField));
-              Add(il.Create(OpCodes.Ldstr, logoUrl));
-              Add(il.Create(OpCodes.Callvirt, logoSetter));
-              method.Body.MaxStackSize = Math.Max(method.Body.MaxStackSize, 2);
+              var getter = property.GetMethod ?? throw new InvalidOperationException($"{property.Name} getter missing");
+              getter.Body.ExceptionHandlers.Clear();
+              getter.Body.Variables.Clear();
+              getter.Body.Instructions.Clear();
+              var il = getter.Body.GetILProcessor();
+              il.Append(il.Create(OpCodes.Ldstr, value));
+              il.Append(il.Create(OpCodes.Ret));
+              getter.Body.MaxStackSize = 1;
           }
 
-          // 1) Force the server's loaded config to the Holyguards URL immediately after
-          //    LoadModConfig assigns _config. This also makes playerlists.json persist the URL.
-          var reload = playerList.Methods.First(m => m.Name == "ReloadConfig");
-          var reloadStore = reload.Body.Instructions.First(i =>
-              i.OpCode == OpCodes.Stfld && i.Operand is FieldReference fr && fr.Name == "_config");
-          InjectSetLogoAfter(reload, reloadStore, configField, logoSetter, LogoUrl);
+          var logo = config.Properties.First(p => p.Name == "Logo");
+          var header = config.Properties.First(p => p.Name == "Header");
+          ReturnConstantString(logo, LogoUrl);
+          ReturnConstantString(header, HeaderText);
 
-          // 2) Force it again immediately before every packet send, protecting against config reloads.
-          var send = playerList.Methods.First(m => m.Name == "SendConfigToPlayer");
-          var sendIl = send.Body.GetILProcessor();
-          var first = send.Body.Instructions.First();
-          var a = sendIl.Create(OpCodes.Ldarg_0);
-          var b = sendIl.Create(OpCodes.Ldfld, configField);
-          var c = sendIl.Create(OpCodes.Ldstr, LogoUrl);
-          var d = sendIl.Create(OpCodes.Callvirt, logoSetter);
-          sendIl.InsertBefore(first, a);
-          sendIl.InsertAfter(a, b);
-          sendIl.InsertAfter(b, c);
-          sendIl.InsertAfter(c, d);
-          send.Body.MaxStackSize = Math.Max(send.Body.MaxStackSize, 2);
+          // Belt and suspenders: change any built-in default logo literal in the server DLL too.
+          foreach (var type in module.Types.SelectMany(AllTypes))
+          {
+              foreach (var method in type.Methods.Where(m => m.HasBody))
+              {
+                  foreach (var ins in method.Body.Instructions)
+                  {
+                      if (ins.OpCode == OpCodes.Ldstr && ins.Operand is string s && s == "playerlist:textures/vs_logo.png")
+                          ins.Operand = LogoUrl;
+                  }
+              }
+          }
 
           asm.Write(output, new WriterParameters { WriteSymbols = false });
-          Console.WriteLine("Patched ReloadConfig and SendConfigToPlayer");
-          Console.WriteLine($"Logo URL: {LogoUrl}");
+          Console.WriteLine("Patched Config.Logo getter -> " + LogoUrl);
+          Console.WriteLine("Patched Config.Header getter -> " + HeaderText);
+
+          static System.Collections.Generic.IEnumerable<TypeDefinition> AllTypes(TypeDefinition root)
+          {
+              yield return root;
+              foreach (var nested in root.NestedTypes.SelectMany(AllTypes)) yield return nested;
+          }
           CS
           dotnet build patcher/patcher.csproj -c Release
 
-      - name: Patch PlayerLists.dll
+      - name: Patch only official PlayerLists.dll
         shell: bash
         run: |
           set -euxo pipefail
           cp official/PlayerLists.dll official/PlayerLists.original.dll
           dotnet patcher/bin/Release/net10.0/patcher.dll official/PlayerLists.original.dll official/PlayerLists.dll
           rm official/PlayerLists.original.dll
-          test -f official/PlayerLists.dll
-          strings -el official/PlayerLists.dll | grep -F 'PlayerLists_Holyguards_logo_300x200.jpg'
           test "$(find official -maxdepth 1 -type f -name '*.dll' | wc -l)" -eq 1
+          strings -el official/PlayerLists.dll | grep -F 'PlayerLists_Holyguards_logo_300x200.png'
+          strings -el official/PlayerLists.dll | grep -F 'HOLYGUARDS'
           sha256sum official/PlayerLists.dll
 
       - name: Verify identity and package
@@ -119,14 +157,15 @@ jobs:
           assert m['modid']=='playerlists', m
           assert m['version']=='2.3.7', m
           assert m['requiredOnClient'] is True, m
-          print('Identity OK:', m['modid'], m['version'])
+          assert m['authors']==['BillyGalbreath','midzuyo'], m
+          print('Identity OK:', m['modid'], m['version'], m['authors'])
           PY
-          (cd official && zip -qr ../PlayerLists-2.3.7-Holyguards-r4.zip .)
-          unzip -t PlayerLists-2.3.7-Holyguards-r4.zip
-          unzip -l PlayerLists-2.3.7-Holyguards-r4.zip | grep 'PlayerLists.dll'
+          (cd official && zip -qr ../PlayerLists-2.3.7-Holyguards-r5.zip .)
+          unzip -t PlayerLists-2.3.7-Holyguards-r5.zip
+          test "$(unzip -Z1 PlayerLists-2.3.7-Holyguards-r5.zip | grep -Ei '\.dll$' | wc -l)" -eq 1
 
       - uses: actions/upload-artifact@v4
         with:
-          name: PlayerLists-2.3.7-Holyguards-r4
-          path: PlayerLists-2.3.7-Holyguards-r4.zip
+          name: PlayerLists-2.3.7-Holyguards-r5
+          path: PlayerLists-2.3.7-Holyguards-r5.zip
           if-no-files-found: error
