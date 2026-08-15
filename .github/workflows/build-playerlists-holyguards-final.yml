@@ -82,7 +82,8 @@ jobs:
           set -euxo pipefail
           python - <<'PY'
           import json
-          m=json.load(open('official/modinfo.json'))
+          with open('official/modinfo.json', encoding='utf-8-sig') as f:
+              m=json.load(f)
           assert m['modid']=='playerlists', m
           assert m['version']=='2.3.7', m
           assert m['requiredOnClient'] is True, m
