@@ -1,0 +1,102 @@
+name: Build PlayerLists Holyguards final
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-playerlists-holyguards-final.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Download official PlayerLists 2.3.7 from Vintage Story ModDB
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -fL 'https://moddbcdn.vintagestory.at/PlayerLists-2.3.7_dd7da4fa71f8bd4a10f1e0c0fc54f608.zip?dl=PlayerLists-2.3.7.zip' -o official.zip
+          mkdir official
+          unzip -q official.zip -d official
+          test -f official/PlayerLists.dll
+          sha256sum official/PlayerLists.dll
+
+      - name: Build exact IL patcher
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dotnet new console -n patcher -f net10.0
+          dotnet add patcher/patcher.csproj package Mono.Cecil --version 0.11.6
+          cat > patcher/Program.cs <<'CS'
+          using System;
+          using System.Linq;
+          using Mono.Cecil;
+          using Mono.Cecil.Cil;
+
+          const string LogoUrl = "https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.jpg";
+          var input = args[0];
+          var output = args[1];
+
+          using var asm = AssemblyDefinition.ReadAssembly(input, new ReaderParameters { ReadSymbols = false });
+          var module = asm.MainModule;
+          var playerList = module.Types.First(t => t.FullName == "playerlists.PlayerList");
+          var config = module.Types.First(t => t.FullName == "playerlists.configuration.Config");
+          var configField = playerList.Fields.First(f => f.Name == "_config");
+          var logoSetter = config.Properties.First(p => p.Name == "Logo").SetMethod
+              ?? throw new InvalidOperationException("Config.Logo setter not found");
+          var send = playerList.Methods.First(m => m.Name == "SendConfigToPlayer");
+          var body = send.Body;
+          var il = body.GetILProcessor();
+          var first = body.Instructions.First();
+
+          // Server-only behavior: immediately before the original SendConfigToPlayer body,
+          // force the exact original Config object to carry the Holyguards logo URL.
+          // No fields, protobuf tags, network channel names, or client code are changed.
+          il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
+          il.InsertBefore(first, il.Create(OpCodes.Ldfld, configField));
+          il.InsertBefore(first, il.Create(OpCodes.Ldstr, LogoUrl));
+          il.InsertBefore(first, il.Create(OpCodes.Callvirt, logoSetter));
+          body.MaxStackSize = Math.Max(body.MaxStackSize, 2);
+
+          asm.Write(output, new WriterParameters { WriteSymbols = false });
+          Console.WriteLine($"Patched {send.FullName}");
+          Console.WriteLine($"Logo URL: {LogoUrl}");
+          CS
+          dotnet build patcher/patcher.csproj -c Release
+
+      - name: Patch only PlayerLists.dll
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp official/PlayerLists.dll official/PlayerLists.original.dll
+          dotnet patcher/bin/Release/net10.0/patcher.dll official/PlayerLists.original.dll official/PlayerLists.dll
+          rm official/PlayerLists.original.dll
+          test -f official/PlayerLists.dll
+          strings official/PlayerLists.dll | grep -F 'PlayerLists_Holyguards_logo_300x200.jpg'
+          test "$(find official -maxdepth 1 -type f -name '*.dll' | wc -l)" -eq 1
+          sha256sum official/PlayerLists.dll
+
+      - name: Verify identity and package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          import json
+          m=json.load(open('official/modinfo.json'))
+          assert m['modid']=='playerlists', m
+          assert m['version']=='2.3.7', m
+          assert m['requiredOnClient'] is True, m
+          print('Identity OK:', m['modid'], m['version'])
+          PY
+          (cd official && zip -qr ../PlayerLists-2.3.7-Holyguards-FINAL.zip .)
+          unzip -t PlayerLists-2.3.7-Holyguards-FINAL.zip
+          unzip -l PlayerLists-2.3.7-Holyguards-FINAL.zip | grep 'PlayerLists.dll'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PlayerLists-2.3.7-Holyguards-FINAL
+          path: PlayerLists-2.3.7-Holyguards-FINAL.zip
+          if-no-files-found: error
