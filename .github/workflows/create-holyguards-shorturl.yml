@@ -1,0 +1,24 @@
+name: Create Holyguards short logo URL
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/create-holyguards-shorturl.yml'
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create exact-length short URL
+        shell: bash
+        run: |
+          set -euxo pipefail
+          target='https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.jpg'
+          result=$(curl -fsS -G 'https://is.gd/create.php' \
+            --data-urlencode 'format=simple' \
+            --data-urlencode 'shorturl=HGTab1' \
+            --data-urlencode "url=$target")
+          echo "SHORT_URL=$result"
+          test "$result" = 'https://is.gd/HGTab1'
+          test "${#result}" -eq 20
