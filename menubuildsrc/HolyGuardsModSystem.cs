@@ -28,7 +28,7 @@ public sealed class HolyGuardsModSystem : ModSystem
         serverChannel = api.Network.GetChannel(NetworkChannelName);
         api.Event.PlayerNowPlaying += OnPlayerNowPlaying;
         api.Event.RegisterGameTickListener(_ => BroadcastServerInfo(), 5000, 2500);
-        api.Logger.Notification("[HolyGuards] HolyGuards 0.4.0 loaded on the server.");
+        api.Logger.Notification("[HolyGuards] HolyGuards 0.4.1 loaded on the server.");
     }
 
     public override void StartClientSide(ICoreClientAPI api)
