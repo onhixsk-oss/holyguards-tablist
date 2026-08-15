@@ -1,0 +1,51 @@
+name: Build Holyguards Player List
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'buildsrc/**'
+      - '.github/workflows/build-holyguards.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download Vintage Story 1.22.6 server assemblies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/vs"
+          curl -fL "https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_1.22.6.tar.gz" -o "$GITHUB_WORKSPACE/vs.tar.gz"
+          tar -xzf "$GITHUB_WORKSPACE/vs.tar.gz" -C "$GITHUB_WORKSPACE/vs"
+          test -f "$GITHUB_WORKSPACE/vs/VintagestoryAPI.dll"
+
+      - name: Build DLL
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dotnet build buildsrc/HolyguardsPlayerList.csproj -c Release -p:VINTAGE_STORY="$GITHUB_WORKSPACE/vs"
+          find buildsrc/bin -maxdepth 4 -type f -print
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p artifact
+          cp buildsrc/bin/Release/net8.0/HolyguardsPlayerList.dll artifact/HolyguardsPlayerList.dll
+
+      - name: Upload DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: holyguardsplayerlist-dll
+          path: artifact/HolyguardsPlayerList.dll
+          if-no-files-found: error
