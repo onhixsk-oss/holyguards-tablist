@@ -9,7 +9,7 @@ public sealed class HolyguardsPlayerListModSystem : ModSystem
     private HolyguardsPlayerListHud hud;
     private bool originalSuppressed;
 
-    // Start after ordinary mods so we can cleanly suppress the stock PlayerLists HUD if it is present.
+    // Start after ordinary mods so the original PlayerLists HUD can be disabled if present.
     public override double ExecuteOrder() => 999.0;
 
     public override void StartClientSide(ICoreClientAPI capi)
@@ -18,7 +18,7 @@ public sealed class HolyguardsPlayerListModSystem : ModSystem
         capi.Event.RegisterCallback(_ => SuppressOriginalPlayerLists(capi), 500);
 
         hud = new HolyguardsPlayerListHud(capi);
-        capi.Logger.Notification("[holyguardsplayerlist] Holyguards server TAB list active.");
+        capi.Logger.Notification("[holyguardsplayerlist] Holyguards hold-TAB player list active.");
     }
 
     private void SuppressOriginalPlayerLists(ICoreClientAPI capi)
@@ -52,23 +52,20 @@ public sealed class HolyguardsPlayerListHud : HudElement
     private const double GuiWidth = 720.0;
     private const double GuiHeight = 480.0;
     private const double SourceWidth = 1536.0;
-    private const double SourceHeight = 1024.0;
     private const double Scale = GuiWidth / SourceWidth;
     private const int MaxRows = 11;
 
-    // Horizontal separators in the source 1536x1024 artwork.
+    // Horizontal separators in the source 1536x1024 Holyguards artwork.
     private static readonly int[] RowLines =
     {
         405, 452, 496, 540, 586, 630, 675, 720, 765, 810, 853, 898
     };
 
-    private readonly HolyguardsKeyHandler keyHandler;
     private readonly long tickListenerId;
     private string lastSignature = string.Empty;
 
     public HolyguardsPlayerListHud(ICoreClientAPI capi) : base(capi)
     {
-        keyHandler = new HolyguardsKeyHandler(capi);
         tickListenerId = capi.Event.RegisterGameTickListener(_ => UpdateList(), 750);
         UpdateList(true);
     }
@@ -76,6 +73,7 @@ public sealed class HolyguardsPlayerListHud : HudElement
     private void UpdateList(bool force = false)
     {
         List<IPlayer> allPlayers = capi.World.AllOnlinePlayers
+            .Where(player => player != null)
             .OrderBy(player => player.PlayerName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -136,13 +134,31 @@ public sealed class HolyguardsPlayerListHud : HudElement
         for (int i = 0; i < regularRows; i++)
         {
             IPlayer player = allPlayers[i];
-            AddRow(composer, i, player.PlayerName, GetRank(player), FormatPing(GetPingMs(player)), nameFont, rankFont, pingFont);
+            AddRow(
+                composer,
+                i,
+                player.PlayerName,
+                GetRank(player),
+                FormatPing(GetPingMs(player)),
+                nameFont,
+                rankFont,
+                pingFont
+            );
         }
 
         if (hasOverflow)
         {
             int remaining = allPlayers.Count - regularRows;
-            AddRow(composer, MaxRows - 1, $"+{remaining} ďalších", string.Empty, string.Empty, nameFont, rankFont, pingFont);
+            AddRow(
+                composer,
+                MaxRows - 1,
+                $"+{remaining} ďalších",
+                string.Empty,
+                string.Empty,
+                nameFont,
+                rankFont,
+                pingFont
+            );
         }
 
         SingleComposer = composer
@@ -163,15 +179,14 @@ public sealed class HolyguardsPlayerListHud : HudElement
         int top = RowLines[row];
         int bottom = RowLines[row + 1];
 
-        // Leave a little vertical breathing room inside the painted row.
         double y = Px(top + 6);
         double h = Math.Max(14, Px(bottom - top - 10));
 
-        // Source artwork columns: player 223-614, rank 619-1044, ping 1049-1313.
+        // Source-art columns: HRÁČ 223-614, RANK 619-1044, PING 1049-1313.
         ElementBounds nameBounds = ElementBounds.Fixed(Px(228), y, Px(382), h);
         ElementBounds rankBounds = ElementBounds.Fixed(Px(624), y, Px(414), h);
 
-        // Keep the right side of the PING column clear for the painted gold bar icon.
+        // Leave the painted signal bars on the far-right side unobstructed.
         ElementBounds pingBounds = ElementBounds.Fixed(Px(1055), y, Px(145), h);
 
         composer.AddStaticText(Trim(name, 24), nameFont, nameBounds);
@@ -224,12 +239,16 @@ public sealed class HolyguardsPlayerListHud : HudElement
         }
     }
 
-    private static string FormatPing(int ping)
+    private static string FormatPing(int ping) => ping < 0 ? "—" : $"{ping} ms";
+
+    private bool IsTabHeld()
     {
-        return ping < 0 ? "—" : $"{ping} ms";
+        bool[] keys = capi.Input.KeyboardKeyState;
+        int index = (int)GlKeys.Tab;
+        return keys != null && index >= 0 && index < keys.Length && keys[index];
     }
 
-    public override bool ShouldReceiveRenderEvents() => keyHandler.IsKeyComboActive();
+    public override bool ShouldReceiveRenderEvents() => IsTabHeld();
 
     public override double InputOrder => 1.0999;
     public override double DrawOrder => 0.8899;
@@ -259,53 +278,6 @@ public sealed class HolyguardsPlayerListHud : HudElement
     public override void Dispose()
     {
         base.Dispose();
-        keyHandler.Dispose();
         capi.Event.UnregisterGameTickListener(tickListenerId);
-    }
-}
-
-public sealed class HolyguardsKeyHandler
-{
-    private readonly ICoreClientAPI capi;
-
-    public HolyguardsKeyHandler(ICoreClientAPI capi)
-    {
-        this.capi = capi;
-        capi.Input.RegisterHotKey(
-            "holyguardsplayerlist",
-            "Holyguards player list",
-            GlKeys.Tab,
-            HotkeyType.GUIOrOtherControls
-        );
-        capi.Input.SetHotKeyHandler("holyguardsplayerlist", _ => true);
-    }
-
-    public bool IsKeyComboActive()
-    {
-        KeyCombination combo = capi.Input.GetHotKeyByCode("holyguardsplayerlist").CurrentMapping;
-        bool[] keys = capi.Input.KeyboardKeyState;
-
-        if (combo == null || keys == null || combo.KeyCode < 0 || combo.KeyCode >= keys.Length) return false;
-
-        return keys[combo.KeyCode]
-               && IsAltDown() == combo.Alt
-               && IsCtrlDown() == combo.Ctrl
-               && IsShiftDown() == combo.Shift;
-    }
-
-    private bool IsAltDown() => IsDown(GlKeys.AltLeft) || IsDown(GlKeys.AltRight) || IsDown(GlKeys.LAlt) || IsDown(GlKeys.RAlt);
-    private bool IsCtrlDown() => IsDown(GlKeys.ControlLeft) || IsDown(GlKeys.ControlRight) || IsDown(GlKeys.LControl) || IsDown(GlKeys.RControl);
-    private bool IsShiftDown() => IsDown(GlKeys.ShiftLeft) || IsDown(GlKeys.ShiftRight) || IsDown(GlKeys.LShift) || IsDown(GlKeys.RShift);
-
-    private bool IsDown(GlKeys key)
-    {
-        bool[] keys = capi.Input.KeyboardKeyState;
-        int index = (int)key;
-        return keys != null && index >= 0 && index < keys.Length && keys[index];
-    }
-
-    public void Dispose()
-    {
-        // Vintage Story owns the hotkey registry; nothing else is required here.
     }
 }
