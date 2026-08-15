@@ -1,4 +1,4 @@
-name: Build PlayerLists Holyguards final
+name: Build PlayerLists Holyguards r4
 
 on:
   workflow_dispatch:
@@ -14,6 +14,15 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Verify Holyguards logo URL
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -fL 'https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.jpg' -o holyguards-logo.jpg
+          test -s holyguards-logo.jpg
+          file holyguards-logo.jpg
+          test "$(wc -c < holyguards-logo.jpg)" -gt 10000
+
       - name: Download official PlayerLists 2.3.7 from Vintage Story ModDB
         shell: bash
         run: |
@@ -24,7 +33,7 @@ jobs:
           test -f official/PlayerLists.dll
           sha256sum official/PlayerLists.dll
 
-      - name: Build exact IL patcher
+      - name: Build IL patcher
         shell: bash
         run: |
           set -euxo pipefail
@@ -47,24 +56,47 @@ jobs:
           var configField = playerList.Fields.First(f => f.Name == "_config");
           var logoSetter = config.Properties.First(p => p.Name == "Logo").SetMethod
               ?? throw new InvalidOperationException("Config.Logo setter not found");
-          var send = playerList.Methods.First(m => m.Name == "SendConfigToPlayer");
-          var body = send.Body;
-          var il = body.GetILProcessor();
-          var first = body.Instructions.First();
 
-          il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
-          il.InsertBefore(first, il.Create(OpCodes.Ldfld, configField));
-          il.InsertBefore(first, il.Create(OpCodes.Ldstr, LogoUrl));
-          il.InsertBefore(first, il.Create(OpCodes.Callvirt, logoSetter));
-          body.MaxStackSize = Math.Max(body.MaxStackSize, 2);
+          static void InjectSetLogoAfter(MethodDefinition method, Instruction anchor, FieldDefinition configField, MethodDefinition logoSetter, string logoUrl)
+          {
+              var il = method.Body.GetILProcessor();
+              var cursor = anchor;
+              void Add(Instruction ins) { il.InsertAfter(cursor, ins); cursor = ins; }
+              Add(il.Create(OpCodes.Ldarg_0));
+              Add(il.Create(OpCodes.Ldfld, configField));
+              Add(il.Create(OpCodes.Ldstr, logoUrl));
+              Add(il.Create(OpCodes.Callvirt, logoSetter));
+              method.Body.MaxStackSize = Math.Max(method.Body.MaxStackSize, 2);
+          }
+
+          // 1) Force the server's loaded config to the Holyguards URL immediately after
+          //    LoadModConfig assigns _config. This also makes playerlists.json persist the URL.
+          var reload = playerList.Methods.First(m => m.Name == "ReloadConfig");
+          var reloadStore = reload.Body.Instructions.First(i =>
+              i.OpCode == OpCodes.Stfld && i.Operand is FieldReference fr && fr.Name == "_config");
+          InjectSetLogoAfter(reload, reloadStore, configField, logoSetter, LogoUrl);
+
+          // 2) Force it again immediately before every packet send, protecting against config reloads.
+          var send = playerList.Methods.First(m => m.Name == "SendConfigToPlayer");
+          var sendIl = send.Body.GetILProcessor();
+          var first = send.Body.Instructions.First();
+          var a = sendIl.Create(OpCodes.Ldarg_0);
+          var b = sendIl.Create(OpCodes.Ldfld, configField);
+          var c = sendIl.Create(OpCodes.Ldstr, LogoUrl);
+          var d = sendIl.Create(OpCodes.Callvirt, logoSetter);
+          sendIl.InsertBefore(first, a);
+          sendIl.InsertAfter(a, b);
+          sendIl.InsertAfter(b, c);
+          sendIl.InsertAfter(c, d);
+          send.Body.MaxStackSize = Math.Max(send.Body.MaxStackSize, 2);
 
           asm.Write(output, new WriterParameters { WriteSymbols = false });
-          Console.WriteLine($"Patched {send.FullName}");
+          Console.WriteLine("Patched ReloadConfig and SendConfigToPlayer");
           Console.WriteLine($"Logo URL: {LogoUrl}");
           CS
           dotnet build patcher/patcher.csproj -c Release
 
-      - name: Patch only PlayerLists.dll
+      - name: Patch PlayerLists.dll
         shell: bash
         run: |
           set -euxo pipefail
@@ -89,12 +121,12 @@ jobs:
           assert m['requiredOnClient'] is True, m
           print('Identity OK:', m['modid'], m['version'])
           PY
-          (cd official && zip -qr ../PlayerLists-2.3.7-Holyguards-FINAL.zip .)
-          unzip -t PlayerLists-2.3.7-Holyguards-FINAL.zip
-          unzip -l PlayerLists-2.3.7-Holyguards-FINAL.zip | grep 'PlayerLists.dll'
+          (cd official && zip -qr ../PlayerLists-2.3.7-Holyguards-r4.zip .)
+          unzip -t PlayerLists-2.3.7-Holyguards-r4.zip
+          unzip -l PlayerLists-2.3.7-Holyguards-r4.zip | grep 'PlayerLists.dll'
 
       - uses: actions/upload-artifact@v4
         with:
-          name: PlayerLists-2.3.7-Holyguards-FINAL
-          path: PlayerLists-2.3.7-Holyguards-FINAL.zip
+          name: PlayerLists-2.3.7-Holyguards-r4
+          path: PlayerLists-2.3.7-Holyguards-r4.zip
           if-no-files-found: error
