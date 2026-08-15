@@ -1,0 +1,8 @@
+{
+  "thresholds": [100, 250, 500],
+  "logo": "https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.jpg",
+  "header": null,
+  "footer": null,
+  "maxNameLength": 20,
+  "maxPlayers": null
+}
