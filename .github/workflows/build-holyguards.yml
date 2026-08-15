@@ -32,8 +32,25 @@ jobs:
       - name: Build DLL
         shell: bash
         run: |
-          set -euxo pipefail
-          dotnet build buildsrc/HolyguardsPlayerList.csproj -c Release -p:VINTAGE_STORY="$GITHUB_WORKSPACE/vs"
+          set +e
+          dotnet build buildsrc/HolyguardsPlayerList.csproj -c Release -v:minimal -p:VINTAGE_STORY="$GITHUB_WORKSPACE/vs" 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "::group::Compiler tail"
+            tail -n 80 build.log
+            echo "::endgroup::"
+            while IFS= read -r line; do
+              case "$line" in
+                *" error CS"*|*" error MSB"*|*"error NETSDK"*)
+                  safe=${line//'%'/'%25'}
+                  safe=${safe//$'\r'/'%0D'}
+                  safe=${safe//$'\n'/'%0A'}
+                  echo "::error title=Holyguards build::$safe"
+                  ;;
+              esac
+            done < build.log
+            exit "$status"
+          fi
           find buildsrc/bin -maxdepth 4 -type f -print
 
       - name: Stage artifact
