@@ -52,9 +52,6 @@ jobs:
           var il = body.GetILProcessor();
           var first = body.Instructions.First();
 
-          // Server-only behavior: immediately before the original SendConfigToPlayer body,
-          // force the exact original Config object to carry the Holyguards logo URL.
-          // No fields, protobuf tags, network channel names, or client code are changed.
           il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
           il.InsertBefore(first, il.Create(OpCodes.Ldfld, configField));
           il.InsertBefore(first, il.Create(OpCodes.Ldstr, LogoUrl));
@@ -75,7 +72,7 @@ jobs:
           dotnet patcher/bin/Release/net10.0/patcher.dll official/PlayerLists.original.dll official/PlayerLists.dll
           rm official/PlayerLists.original.dll
           test -f official/PlayerLists.dll
-          strings official/PlayerLists.dll | grep -F 'PlayerLists_Holyguards_logo_300x200.jpg'
+          strings -el official/PlayerLists.dll | grep -F 'PlayerLists_Holyguards_logo_300x200.jpg'
           test "$(find official -maxdepth 1 -type f -name '*.dll' | wc -l)" -eq 1
           sha256sum official/PlayerLists.dll
 
