@@ -1,0 +1,57 @@
+name: Build HolyGuards Menu 0.4.0
+
+on:
+  push:
+    branches:
+      - holyguards-menu-0.4.0-build
+    paths:
+      - 'menubuildsrc/**'
+      - '.github/workflows/build-holyguards-menu-0.4.0.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Download Vintage Story 1.22.6 server assemblies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/vs"
+          curl -fL "https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_1.22.6.tar.gz" -o "$GITHUB_WORKSPACE/vs.tar.gz"
+          tar -xzf "$GITHUB_WORKSPACE/vs.tar.gz" -C "$GITHUB_WORKSPACE/vs"
+          test -f "$GITHUB_WORKSPACE/vs/VintagestoryAPI.dll"
+
+      - name: Build HolyGuards DLL
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet build menubuildsrc/HolyGuards.csproj -c Release -v:minimal -p:VINTAGE_STORY="$GITHUB_WORKSPACE/vs" 2>&1 | tee build.log
+
+      - name: Stage DLL
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p artifact
+          DLL=$(find menubuildsrc/bin/Release -type f -name 'HolyGuards.dll' | head -n 1)
+          test -n "$DLL"
+          cp "$DLL" artifact/HolyGuards.dll
+          sha256sum artifact/HolyGuards.dll
+
+      - name: Upload HolyGuards DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: holyguards-menu-0.4.0-dll
+          path: artifact/HolyGuards.dll
+          if-no-files-found: error
