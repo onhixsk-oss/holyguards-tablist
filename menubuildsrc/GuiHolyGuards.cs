@@ -14,6 +14,7 @@ public sealed class GuiHolyGuards : GuiDialog
     private const double MenuWidth = 960;
     private const double MenuHeight = 720;
     private const double TotalWidth = PlayerPanelWidth + PanelGap + MenuWidth;
+    private const int UnknownCoordinate = int.MinValue;
 
     private const int PlayerSlots = 20;
     private const int PlayerRowsPerColumn = 10;
@@ -140,8 +141,18 @@ public sealed class GuiHolyGuards : GuiDialog
         SetText("hg-worldtime", FormatWorldTime(packet.WorldHour));
         SetText("hg-seed", packet.WorldSeed.ToString(CultureInfo.InvariantCulture));
         SetText("hg-maptype", FormatPlayStyle(packet.PlayStyleCode, packet.WorldType));
-        SetText("hg-spawn", $"{packet.SpawnX}, {packet.SpawnY}, {packet.SpawnZ}");
+        SetText("hg-spawn", FormatSpawn(packet.SpawnX, packet.SpawnY, packet.SpawnZ));
         UpdatePlayerList(packet);
+    }
+
+    private static string FormatSpawn(int x, int y, int z)
+    {
+        if (x == UnknownCoordinate || y == UnknownCoordinate || z == UnknownCoordinate)
+        {
+            return "-";
+        }
+
+        return $"{x}, {y}, {z}";
     }
 
     private void SetText(string key, string? value)
