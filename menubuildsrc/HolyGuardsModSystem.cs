@@ -10,10 +10,12 @@ namespace HolyGuards;
 public sealed class HolyGuardsModSystem : ModSystem
 {
     private const string NetworkChannelName = "holyguards-info";
+    private const int UnknownCoordinate = int.MinValue;
 
     private GuiHolyGuards? dialog;
     private ICoreServerAPI? serverApi;
     private IServerNetworkChannel? serverChannel;
+    private bool broadcastErrorLogged;
 
     public override void Start(ICoreAPI api)
     {
@@ -28,7 +30,7 @@ public sealed class HolyGuardsModSystem : ModSystem
         serverChannel = api.Network.GetChannel(NetworkChannelName);
         api.Event.PlayerNowPlaying += OnPlayerNowPlaying;
         api.Event.RegisterGameTickListener(_ => BroadcastServerInfo(), 5000, 2500);
-        api.Logger.Notification("[HolyGuards] HolyGuards 0.4.1 loaded on the server.");
+        api.Logger.Notification("[HolyGuards] HolyGuards 0.4.2 loaded on the server.");
     }
 
     public override void StartClientSide(ICoreClientAPI api)
@@ -63,21 +65,48 @@ public sealed class HolyGuardsModSystem : ModSystem
 
     private void OnPlayerNowPlaying(IServerPlayer player)
     {
-        if (serverChannel == null) return;
-        serverChannel.SendPacket(BuildServerInfoPacket(), player);
+        if (serverChannel == null || serverApi == null) return;
+
+        try
+        {
+            serverChannel.SendPacket(BuildServerInfoPacket(), player);
+        }
+        catch (Exception e)
+        {
+            serverApi.Logger.Error("[HolyGuards] Failed to send initial server info: {0}", e.Message);
+        }
     }
 
     private void BroadcastServerInfo()
     {
         if (serverChannel == null || serverApi == null) return;
-        serverChannel.BroadcastPacket(BuildServerInfoPacket());
+
+        try
+        {
+            serverChannel.BroadcastPacket(BuildServerInfoPacket());
+            broadcastErrorLogged = false;
+        }
+        catch (Exception e)
+        {
+            // Do not flood server-main.log if a future API field is unavailable.
+            if (!broadcastErrorLogged)
+            {
+                serverApi.Logger.Error("[HolyGuards] Server-info update failed: {0}", e.Message);
+                broadcastErrorLogged = true;
+            }
+        }
     }
 
     private HolyGuardsServerInfoPacket BuildServerInfoPacket()
     {
         if (serverApi == null)
         {
-            return new HolyGuardsServerInfoPacket();
+            return new HolyGuardsServerInfoPacket
+            {
+                SpawnX = UnknownCoordinate,
+                SpawnY = UnknownCoordinate,
+                SpawnZ = UnknownCoordinate
+            };
         }
 
         IServerPlayer[] players = serverApi.World.AllOnlinePlayers
@@ -107,7 +136,13 @@ public sealed class HolyGuardsModSystem : ModSystem
             .ToArray();
 
         PlayStyle? playStyle = serverApi.WorldManager.CurrentPlayStyle;
-        int[] spawn = serverApi.WorldManager.DefaultSpawnPosition ?? Array.Empty<int>();
+
+        // VS 1.22.4 can throw NullReferenceException while reading
+        // WorldManager.DefaultSpawnPosition even after the world is loaded.
+        // Spawn is therefore optional for this build instead of risking the server loop.
+        int spawnX = UnknownCoordinate;
+        int spawnY = UnknownCoordinate;
+        int spawnZ = UnknownCoordinate;
 
         return new HolyGuardsServerInfoPacket
         {
@@ -121,9 +156,9 @@ public sealed class HolyGuardsModSystem : ModSystem
             GameVersion = GameVersion.ShortGameVersion,
             PlayStyleCode = playStyle?.Code ?? "",
             WorldType = playStyle?.WorldType ?? "",
-            SpawnX = spawn.Length > 0 ? spawn[0] : 0,
-            SpawnY = spawn.Length > 1 ? spawn[1] : 0,
-            SpawnZ = spawn.Length > 2 ? spawn[2] : 0
+            SpawnX = spawnX,
+            SpawnY = spawnY,
+            SpawnZ = spawnZ
         };
     }
 }
