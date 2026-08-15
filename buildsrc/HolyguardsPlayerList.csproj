@@ -4,7 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>HolyguardsPlayerList</AssemblyName>
+    <AssemblyName>HolyguardsBridge</AssemblyName>
     <RootNamespace>HolyguardsPlayerList</RootNamespace>
   </PropertyGroup>
 
