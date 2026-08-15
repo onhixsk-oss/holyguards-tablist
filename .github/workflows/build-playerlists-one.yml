@@ -1,0 +1,83 @@
+name: Build One-Mod Holyguards PlayerLists
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-playerlists-one.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout helper repo
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Download Vintage Story 1.22.4 server assemblies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/vs"
+          curl -fL "https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_1.22.4.tar.gz" -o "$GITHUB_WORKSPACE/vs.tar.gz"
+          tar -xzf "$GITHUB_WORKSPACE/vs.tar.gz" -C "$GITHUB_WORKSPACE/vs"
+          test -f "$GITHUB_WORKSPACE/vs/VintagestoryAPI.dll"
+
+      - name: Clone original PlayerLists source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/BillysArchive/VS-PlayerList.git original-playerlists
+
+      - name: Apply Holyguards server-side defaults while keeping original client protocol
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('original-playerlists')
+          csproj = root / 'PlayerList.csproj'
+          text = csproj.read_text(encoding='utf-8-sig')
+          text = text.replace('<TargetFramework>net8.0</TargetFramework>', '<TargetFramework>net10.0</TargetFramework>')
+          text = text.replace('<Version>2.3.4</Version>', '<Version>2.3.7</Version>')
+          text = text.replace('<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>')
+          if '<AssemblyName>' not in text:
+              text = text.replace('<Version>2.3.7</Version>', '<Version>2.3.7</Version>\n        <AssemblyName>PlayerLists</AssemblyName>')
+          csproj.write_text(text, encoding='utf-8')
+
+          player = root / 'src' / 'PlayerList.cs'
+          text = player.read_text(encoding='utf-8')
+          old = '''        _config = Api.LoadModConfig<Config>($"{ModId}.json") ?? new Config();\n\n        if (_config.Logo == "https://i.imgur.com/gTAs0Il.png") {\n            _config.Logo = "playerlist:textures/vs_logo.png";\n        }'''
+          new = '''        _config = Api.LoadModConfig<Config>($"{ModId}.json") ?? new Config();\n\n        // Holyguards server branding is embedded directly into the server copy of PlayerLists.\n        // Clients still use the official PlayerLists 2.3.7 from Vintage Story ModDB.\n        // The network Config schema/channel remain unchanged, so the official client receives these values.\n        if (Api is ICoreServerAPI) {\n            _config.Logo = "https://raw.githubusercontent.com/onhixsk-oss/holyguards-tablist/main/assets/PlayerLists_Holyguards_logo_300x200.jpg";\n            _config.Header = "HOLYGUARDS";\n            _config.Footer = null;\n            _config.Thresholds = [100, 250, 500];\n            _config.MaxNameLength = 20;\n        } else if (_config.Logo == "https://i.imgur.com/gTAs0Il.png") {\n            _config.Logo = "playerlist:textures/vs_logo.png";\n        }'''
+          if old not in text:
+              raise SystemExit('Could not find expected ReloadConfig block in PlayerList.cs')
+          text = text.replace(old, new)
+          player.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Build PlayerLists DLL
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dotnet build original-playerlists/PlayerList.csproj -c Release -v:minimal -p:VINTAGE_STORY="$GITHUB_WORKSPACE/vs"
+          find original-playerlists/bin -type f -maxdepth 4 -print
+          DLL=$(find original-playerlists/bin -type f -name 'PlayerLists.dll' | head -n1)
+          test -n "$DLL"
+          mkdir -p artifact
+          cp "$DLL" artifact/PlayerLists.dll
+          sha256sum artifact/PlayerLists.dll
+
+      - name: Upload compiled PlayerLists DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: holyguards-playerlists-one-mod-dll
+          path: artifact/PlayerLists.dll
+          if-no-files-found: error
