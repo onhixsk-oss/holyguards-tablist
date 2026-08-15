@@ -1,0 +1,62 @@
+name: Build Merged Holyguards PlayerLists
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'buildsrc/HolyguardsPlayerList.cs'
+      - 'buildsrc/HolyguardsPlayerList.csproj'
+      - 'buildsrc/PlayerLists.original.dll'
+      - '.github/workflows/build-playerlists-merged.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Download Vintage Story 1.22.4 server assemblies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/vs"
+          curl -fL "https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_1.22.4.tar.gz" -o "$GITHUB_WORKSPACE/vs.tar.gz"
+          tar -xzf "$GITHUB_WORKSPACE/vs.tar.gz" -C "$GITHUB_WORKSPACE/vs"
+          test -f "$GITHUB_WORKSPACE/vs/VintagestoryAPI.dll"
+
+      - name: Build Holyguards bridge
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dotnet build buildsrc/HolyguardsPlayerList.csproj -c Release -v:minimal -p:VINTAGE_STORY="$GITHUB_WORKSPACE/vs"
+          test -f buildsrc/bin/Release/net10.0/HolyguardsBridge.dll
+          test -f buildsrc/PlayerLists.original.dll
+
+      - name: Install ILRepack
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dotnet tool install --global dotnet-ilrepack --version 2.0.46
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Merge into one PlayerLists assembly
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p merged
+          ilrepack /out:merged/PlayerLists.dll buildsrc/PlayerLists.original.dll buildsrc/bin/Release/net10.0/HolyguardsBridge.dll
+          test -s merged/PlayerLists.dll
+          sha256sum buildsrc/PlayerLists.original.dll merged/PlayerLists.dll
+
+      - name: Upload merged DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: playerlists-holyguards-merged-dll
+          path: merged/PlayerLists.dll
+          if-no-files-found: error
