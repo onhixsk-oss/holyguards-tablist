@@ -1,4 +1,4 @@
-name: Build Holyguards Tablist 1.3.3 VISUALFIX
+name: Build Holyguards Tablist 1.3.4 LIVEPING
 
 on:
   workflow_dispatch:
@@ -8,6 +8,7 @@ on:
       - '.github/workflows/build-holyguards-tablist-1.3.0-final.yml'
       - 'buildsrc/standalone130/**'
       - 'assets/PlayerLists_Holyguards_logo_300x200.png'
+      - 'assets/PlayerLists_Holyguards_alpha.png'
 
 permissions:
   contents: write
@@ -42,7 +43,25 @@ jobs:
           cp buildsrc/standalone130/PlayerListHud.cs upstream/src/gui/PlayerListHud.cs
           cp buildsrc/standalone130/GuiHolyguardsTable.cs upstream/src/gui/element/GuiHolyguardsTable.cs
           mkdir -p upstream/resources/assets/holyguardstablist/textures/gui
-          cp assets/PlayerLists_Holyguards_logo_300x200.png upstream/resources/assets/holyguardstablist/textures/gui/tablist.png
+
+          # Keep the ornate frame and Holyguards logo, but make the unwanted scenic
+          # background transparent.  The count and player-row dark overlays are still
+          # drawn dynamically by GuiHolyguardsTable.cs, exactly as requested.
+          python -m pip install --disable-pip-version-check pillow
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+
+          source = Image.open('assets/PlayerLists_Holyguards_logo_300x200.png').convert('RGBA')
+          alpha = Image.open('assets/PlayerLists_Holyguards_alpha.png').convert('L')
+          if source.size != alpha.size:
+              raise RuntimeError(f'Alpha mask size {alpha.size} does not match tablist {source.size}')
+          source.putalpha(alpha)
+          output = Path('upstream/resources/assets/holyguardstablist/textures/gui/tablist.png')
+          source.save(output, optimize=True)
+          print('Transparent tablist:', output, source.size)
+          PY
+
           rm -f upstream/resources/assets/holyguardstablist/textures/vs_logo.png
 
           cat > upstream/resources/modinfo.json <<'JSON'
@@ -50,8 +69,8 @@ jobs:
             "type": "code",
             "name": "Holyguards Tablist",
             "modid": "holyguardstablist",
-            "version": "1.3.3",
-            "description": "Standalone Holyguards TAB player list with the approved responsive Holyguards HUD.",
+            "version": "1.3.4",
+            "description": "Standalone Holyguards TAB player list with transparent frame background and live ping.",
             "website": "https://github.com/onhixsk-oss/holyguards-tablist",
             "authors": [ "Holyguards" ],
             "side": "Universal",
@@ -71,8 +90,8 @@ jobs:
           proj = Path('upstream/PlayerList.csproj')
           s = proj.read_text(encoding='utf-8-sig')
           s = s.replace('<TargetFramework>net8.0</TargetFramework>', '<TargetFramework>net10.0</TargetFramework>')
-          s = s.replace('<Version>2.3.4</Version>', '<Version>1.3.3</Version>\n        <AssemblyName>HolyguardsTablist</AssemblyName>')
-          s = s.replace('<Description>View the player list on Vintage Story servers</Description>', '<Description>Standalone Holyguards TAB player list with approved responsive HUD</Description>')
+          s = s.replace('<Version>2.3.4</Version>', '<Version>1.3.4</Version>\n        <AssemblyName>HolyguardsTablist</AssemblyName>')
+          s = s.replace('<Description>View the player list on Vintage Story servers</Description>', '<Description>Standalone Holyguards TAB player list with transparent frame background and live ping</Description>')
           proj.write_text(s, encoding='utf-8')
           PY
 
@@ -105,21 +124,26 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
+          from PIL import Image
           m = json.loads(Path('package/modinfo.json').read_text())
           assert m['modid'] == 'holyguardstablist'
-          assert m['version'] == '1.3.3'
+          assert m['version'] == '1.3.4'
           assert [p.name for p in Path('package').rglob('*.dll')] == ['HolyguardsTablist.dll']
+          tab = Image.open('package/assets/holyguardstablist/textures/gui/tablist.png').convert('RGBA')
+          amin, amax = tab.getchannel('A').getextrema()
+          assert amin == 0 and amax == 255, (amin, amax)
+          print('Transparent alpha OK:', (amin, amax))
           PY
 
-          (cd package && zip -qr ../holyguardstablist_1.3.3_visualfix.zip .)
-          unzip -t holyguardstablist_1.3.3_visualfix.zip
-          sha256sum holyguardstablist_1.3.3_visualfix.zip
+          (cd package && zip -qr ../holyguardstablist_1.3.4_liveping.zip .)
+          unzip -t holyguardstablist_1.3.4_liveping.zip
+          sha256sum holyguardstablist_1.3.4_liveping.zip
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: holyguardstablist-1.3.3-visualfix
-          path: holyguardstablist_1.3.3_visualfix.zip
+          name: holyguardstablist-1.3.4-liveping
+          path: holyguardstablist_1.3.4_liveping.zip
           if-no-files-found: error
 
       - name: Publish test ZIP
@@ -129,7 +153,7 @@ jobs:
         run: |
           set -euxo pipefail
           TAG='holyguardstablist-test'
-          FILE='holyguardstablist_1.3.3_visualfix.zip'
+          FILE='holyguardstablist_1.3.4_liveping.zip'
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" "$FILE" --clobber --repo "$GITHUB_REPOSITORY"
           else

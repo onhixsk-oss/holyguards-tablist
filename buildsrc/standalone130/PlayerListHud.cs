@@ -10,6 +10,7 @@ public sealed class PlayerListHud : HudElement {
     private const double TopOffset = 22;
     private const double HorizontalSafeMargin = 24;
     private const double BottomSafeMargin = 24;
+    private const int RefreshIntervalMs = 500;
 
     private readonly PlayerList _mod;
     private readonly KeyHandler _keyHandler;
@@ -23,7 +24,7 @@ public sealed class PlayerListHud : HudElement {
     public PlayerListHud(PlayerList mod) : base((ICoreClientAPI)mod.Api) {
         _mod = mod;
         _keyHandler = new KeyHandler(capi);
-        _gameTickListenerId = capi.Event.RegisterGameTickListener(_ => UpdateList(), 1000);
+        _gameTickListenerId = capi.Event.RegisterGameTickListener(_ => UpdateList(), RefreshIntervalMs);
     }
 
     public void UpdateList(bool force = false) {
@@ -33,7 +34,12 @@ public sealed class PlayerListHud : HudElement {
             .ToList();
 
         bool viewportChanged = HasViewportChanged();
-        if (!force && !viewportChanged && _players.SequenceEqual(players)) return;
+        bool playersChanged = !_players.SequenceEqual(players);
+        bool tabVisible = _keyHandler.IsKeyComboActive();
+
+        // Recompose while TAB is held so PlayerData is recreated from the latest
+        // ClientPlayer.Ping value. This makes both the numeric ping and bar icon live.
+        if (!force && !viewportChanged && !playersChanged && !tabVisible) return;
 
         CaptureViewportState();
         Compose(_players = players);
