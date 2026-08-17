@@ -148,9 +148,9 @@ jobs:
           print('DLL OK:', dlls[0])
           PY
 
-          (cd package && zip -qr ../holyguardstablist_1.3.0.zip .)
-          unzip -t holyguardstablist_1.3.0.zip
-          sha256sum holyguardstablist_1.3.0.zip
+          (cd package && zip -qr ../holyguardstablist_1.3.0_test13.zip .)
+          unzip -t holyguardstablist_1.3.0_test13.zip
+          sha256sum holyguardstablist_1.3.0_test13.zip
 
       - name: Publish test ZIP
         shell: bash
@@ -159,10 +159,11 @@ jobs:
         run: |
           set -euxo pipefail
           TAG='holyguardstablist-test'
+          FILE='holyguardstablist_1.3.0_test13.zip'
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" holyguardstablist_1.3.0.zip --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$TAG" "$FILE" --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" holyguardstablist_1.3.0.zip \
+            gh release create "$TAG" "$FILE" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title 'Holyguards Tablist Test Build' \
