@@ -20,12 +20,12 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Download Vintage Story 1.22.4 server assemblies
+      - name: Download Vintage Story 1.22.6 server assemblies
         shell: bash
         run: |
           set -euxo pipefail
           mkdir -p "$GITHUB_WORKSPACE/vs"
-          curl -fL "https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_1.22.4.tar.gz" -o "$GITHUB_WORKSPACE/vs.tar.gz"
+          curl -fL "https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_1.22.6.tar.gz" -o "$GITHUB_WORKSPACE/vs.tar.gz"
           tar -xzf "$GITHUB_WORKSPACE/vs.tar.gz" -C "$GITHUB_WORKSPACE/vs"
           test -f "$GITHUB_WORKSPACE/vs/VintagestoryAPI.dll"
 
