@@ -1,4 +1,4 @@
-name: Build Holyguards Tablist 1.3.0 FINAL
+name: Build Holyguards Tablist 1.3.1 FINAL
 
 on:
   workflow_dispatch:
@@ -61,7 +61,7 @@ jobs:
             "type": "code",
             "name": "Holyguards Tablist",
             "modid": "holyguardstablist",
-            "version": "1.3.0",
+            "version": "1.3.1",
             "description": "Standalone Holyguards TAB player list with a custom Holyguards HUD.",
             "website": "https://github.com/onhixsk-oss/holyguards-tablist",
             "authors": [ "Holyguards" ],
@@ -83,7 +83,7 @@ jobs:
           proj = Path('upstream/PlayerList.csproj')
           s = proj.read_text(encoding='utf-8-sig')
           s = s.replace('<TargetFramework>net8.0</TargetFramework>', '<TargetFramework>net10.0</TargetFramework>')
-          s = s.replace('<Version>2.3.4</Version>', '<Version>1.3.0</Version>\n        <AssemblyName>HolyguardsTablist</AssemblyName>')
+          s = s.replace('<Version>2.3.4</Version>', '<Version>1.3.1</Version>\n        <AssemblyName>HolyguardsTablist</AssemblyName>')
           s = s.replace('<Description>View the player list on Vintage Story servers</Description>', '<Description>Standalone Holyguards TAB player list with custom HUD</Description>')
           proj.write_text(s, encoding='utf-8')
           PY
@@ -139,7 +139,7 @@ jobs:
           from pathlib import Path
           m = json.loads(Path('package/modinfo.json').read_text())
           assert m['modid'] == 'holyguardstablist'
-          assert m['version'] == '1.3.0'
+          assert m['version'] == '1.3.1'
           assert m['requiredOnClient'] is True
           assert m['requiredOnServer'] is True
           dlls = list(Path('package').rglob('*.dll'))
@@ -148,9 +148,9 @@ jobs:
           print('DLL OK:', dlls[0])
           PY
 
-          (cd package && zip -qr ../holyguardstablist_1.3.0_test13.zip .)
-          unzip -t holyguardstablist_1.3.0_test13.zip
-          sha256sum holyguardstablist_1.3.0_test13.zip
+          (cd package && zip -qr ../holyguardstablist_1.3.1_test14.zip .)
+          unzip -t holyguardstablist_1.3.1_test14.zip
+          sha256sum holyguardstablist_1.3.1_test14.zip
 
       - name: Publish test ZIP
         shell: bash
@@ -159,7 +159,7 @@ jobs:
         run: |
           set -euxo pipefail
           TAG='holyguardstablist-test'
-          FILE='holyguardstablist_1.3.0_test13.zip'
+          FILE='holyguardstablist_1.3.1_test14.zip'
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" "$FILE" --clobber --repo "$GITHUB_REPOSITORY"
           else
