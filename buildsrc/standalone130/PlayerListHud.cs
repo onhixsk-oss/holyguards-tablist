@@ -1,14 +1,23 @@
 using holyguardstablist.gui.element;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
+using Vintagestory.API.Config;
 
 namespace holyguardstablist.gui;
 
 public sealed class PlayerListHud : HudElement {
+    private const double TopOffset = 22;
+    private const double HorizontalSafeMargin = 24;
+    private const double BottomSafeMargin = 24;
+
     private readonly PlayerList _mod;
     private readonly KeyHandler _keyHandler;
     private readonly long _gameTickListenerId;
     private List<string> _players = [];
+
+    private int _lastFrameWidth = -1;
+    private int _lastFrameHeight = -1;
+    private float _lastGuiScale = -1;
 
     public PlayerListHud(PlayerList mod) : base((ICoreClientAPI)mod.Api) {
         _mod = mod;
@@ -22,30 +31,64 @@ public sealed class PlayerListHud : HudElement {
             .Select(player => player.PlayerUID)
             .ToList();
 
-        if (!force && _players.SequenceEqual(players)) return;
+        bool viewportChanged = HasViewportChanged();
+        if (!force && !viewportChanged && _players.SequenceEqual(players)) return;
 
+        CaptureViewportState();
         Compose(_players = players);
         TryOpen();
+    }
+
+    private bool HasViewportChanged() {
+        return _lastFrameWidth != capi.Render.FrameWidth
+            || _lastFrameHeight != capi.Render.FrameHeight
+            || Math.Abs(_lastGuiScale - RuntimeEnv.GUIScale) > 0.001f;
+    }
+
+    private void CaptureViewportState() {
+        _lastFrameWidth = capi.Render.FrameWidth;
+        _lastFrameHeight = capi.Render.FrameHeight;
+        _lastGuiScale = RuntimeEnv.GUIScale;
+    }
+
+    private double GetLayoutScale() {
+        // ElementBounds and GuiElement.scaled() use Vintage Story's GUI scale,
+        // while FrameWidth/FrameHeight are framebuffer pixels. Convert the
+        // framebuffer to logical GUI units first, then only shrink the fixed
+        // 720x480 reference canvas when it would no longer fit.
+        double guiScale = Math.Max(0.01, RuntimeEnv.GUIScale);
+        double logicalWidth = capi.Render.FrameWidth / guiScale;
+        double logicalHeight = capi.Render.FrameHeight / guiScale;
+
+        double availableWidth = Math.Max(1, logicalWidth - HorizontalSafeMargin * 2);
+        double availableHeight = Math.Max(1, logicalHeight - TopOffset - BottomSafeMargin);
+
+        double widthScale = availableWidth / GuiHolyguardsTable.Width;
+        double heightScale = availableHeight / GuiHolyguardsTable.Height;
+
+        return Math.Clamp(Math.Min(widthScale, heightScale), 0.1, 1.0);
     }
 
     private void Compose(List<string> players) {
         if (players.Count == 0) return;
 
+        double layoutScale = GetLayoutScale();
+
         ElementBounds table = new() {
             Alignment = EnumDialogArea.CenterTop,
             BothSizing = ElementSizing.Fixed,
-            fixedWidth = GuiHolyguardsTable.Width,
-            fixedHeight = GuiHolyguardsTable.Height
+            fixedWidth = GuiHolyguardsTable.Width * layoutScale,
+            fixedHeight = GuiHolyguardsTable.Height * layoutScale
         };
 
         SingleComposer = capi.Gui
             .CreateCompo("holyguardstablist", new ElementBounds {
                 Alignment = EnumDialogArea.CenterTop,
                 BothSizing = ElementSizing.FitToChildren,
-                fixedOffsetY = 22
+                fixedOffsetY = TopOffset * layoutScale
             })
             .BeginChildElements()
-            .AddStaticElement(new GuiHolyguardsTable(_mod, players, table))
+            .AddStaticElement(new GuiHolyguardsTable(_mod, players, table, layoutScale))
             .EndChildElements()
             .Compose();
     }
