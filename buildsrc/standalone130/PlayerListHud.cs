@@ -17,7 +17,7 @@ public sealed class PlayerListHud : HudElement {
 
     private int _lastFrameWidth = -1;
     private int _lastFrameHeight = -1;
-    private float _lastGuiScale = -1;
+    private double _lastGuiScale = -1;
 
     public PlayerListHud(PlayerList mod) : base((ICoreClientAPI)mod.Api) {
         _mod = mod;
@@ -42,7 +42,7 @@ public sealed class PlayerListHud : HudElement {
     private bool HasViewportChanged() {
         return _lastFrameWidth != capi.Render.FrameWidth
             || _lastFrameHeight != capi.Render.FrameHeight
-            || Math.Abs(_lastGuiScale - RuntimeEnv.GUIScale) > 0.001f;
+            || Math.Abs(_lastGuiScale - RuntimeEnv.GUIScale) > 0.001;
     }
 
     private void CaptureViewportState() {
@@ -52,10 +52,9 @@ public sealed class PlayerListHud : HudElement {
     }
 
     private double GetLayoutScale() {
-        // ElementBounds and GuiElement.scaled() use Vintage Story's GUI scale,
-        // while FrameWidth/FrameHeight are framebuffer pixels. Convert the
-        // framebuffer to logical GUI units first, then only shrink the fixed
-        // 720x480 reference canvas when it would no longer fit.
+        // FrameWidth/FrameHeight are physical framebuffer pixels, while
+        // ElementBounds/scaled() work in GUI units. Convert the viewport first
+        // and only shrink the canonical 720x480 design when it cannot fit.
         double guiScale = Math.Max(0.01, RuntimeEnv.GUIScale);
         double logicalWidth = capi.Render.FrameWidth / guiScale;
         double logicalHeight = capi.Render.FrameHeight / guiScale;
@@ -66,6 +65,8 @@ public sealed class PlayerListHud : HudElement {
         double widthScale = availableWidth / GuiHolyguardsTable.Width;
         double heightScale = availableHeight / GuiHolyguardsTable.Height;
 
+        // Never stretch the approved artwork. On large resolutions it stays at
+        // its canonical GUI size; on smaller ones it shrinks uniformly.
         return Math.Clamp(Math.Min(widthScale, heightScale), 0.1, 1.0);
     }
 
