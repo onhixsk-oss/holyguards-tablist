@@ -52,6 +52,13 @@ public sealed class PlayerListHud : HudElement {
         _lastGuiScale = RuntimeEnv.GUIScale;
     }
 
+    private double PreferredMaxScale() {
+        int frameWidth = capi.Render.FrameWidth;
+        if (frameWidth <= 1920) return 0.86;
+        if (frameWidth <= 2560) return 0.94;
+        return 1.0;
+    }
+
     private double GetLayoutScale() {
         double guiScale = Math.Max(0.01, RuntimeEnv.GUIScale);
         double logicalWidth = capi.Render.FrameWidth / guiScale;
@@ -62,8 +69,9 @@ public sealed class PlayerListHud : HudElement {
 
         double widthScale = availableWidth / GuiHolyguardsTable.Width;
         double heightScale = availableHeight / GuiHolyguardsTable.Height;
+        double preferredMax = PreferredMaxScale();
 
-        return Math.Clamp(Math.Min(widthScale, heightScale), 0.1, 1.0);
+        return Math.Clamp(Math.Min(Math.Min(widthScale, heightScale), preferredMax), 0.1, preferredMax);
     }
 
     private void Compose(List<string> players) {
@@ -73,9 +81,6 @@ public sealed class PlayerListHud : HudElement {
         double width = GuiHolyguardsTable.Width * layoutScale;
         double height = GuiHolyguardsTable.Height * layoutScale;
 
-        // GuiComposer requires a real parent bounds object for child elements.
-        // The parent and the custom table bounds must be different instances;
-        // reusing one object would create a self-referencing bounds hierarchy.
         ElementBounds content = new() {
             Alignment = EnumDialogArea.CenterTop,
             BothSizing = ElementSizing.Fixed,
