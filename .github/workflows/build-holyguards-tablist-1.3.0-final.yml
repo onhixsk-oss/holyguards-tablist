@@ -45,8 +45,7 @@ jobs:
           mkdir -p upstream/resources/assets/holyguardstablist/textures/gui
 
           # Keep the ornate frame and Holyguards logo, but make the unwanted scenic
-          # background transparent.  The count and player-row dark overlays are still
-          # drawn dynamically by GuiHolyguardsTable.cs, exactly as requested.
+          # background transparent. The count and player-row dark overlays remain.
           python -m pip install --disable-pip-version-check pillow
           python - <<'PY'
           from pathlib import Path
@@ -54,8 +53,10 @@ jobs:
 
           source = Image.open('assets/PlayerLists_Holyguards_logo_300x200.png').convert('RGBA')
           alpha = Image.open('assets/PlayerLists_Holyguards_alpha.png').convert('L')
+          # The source artwork is stored at 300x200 and is normally stretched by the
+          # HUD to its canonical 1040x580 canvas. Do that first, then apply the mask.
           if source.size != alpha.size:
-              raise RuntimeError(f'Alpha mask size {alpha.size} does not match tablist {source.size}')
+              source = source.resize(alpha.size, Image.Resampling.LANCZOS)
           source.putalpha(alpha)
           output = Path('upstream/resources/assets/holyguardstablist/textures/gui/tablist.png')
           source.save(output, optimize=True)
@@ -130,9 +131,10 @@ jobs:
           assert m['version'] == '1.3.4'
           assert [p.name for p in Path('package').rglob('*.dll')] == ['HolyguardsTablist.dll']
           tab = Image.open('package/assets/holyguardstablist/textures/gui/tablist.png').convert('RGBA')
+          assert tab.size == (1040, 580), tab.size
           amin, amax = tab.getchannel('A').getextrema()
           assert amin == 0 and amax == 255, (amin, amax)
-          print('Transparent alpha OK:', (amin, amax))
+          print('Transparent alpha OK:', tab.size, (amin, amax))
           PY
 
           (cd package && zip -qr ../holyguardstablist_1.3.4_liveping.zip .)
