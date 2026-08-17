@@ -9,17 +9,27 @@ on:
       - 'assets/PlayerLists_Holyguards_logo_300x200.png'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Prepare source and .NET 10
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch "$GITHUB_REF_NAME" "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_WORKSPACE/source"
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
+          if ! dotnet --list-sdks 2>/dev/null | grep -q '^10\.'; then
+            curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+            bash /tmp/dotnet-install.sh --channel 10.0 --install-dir "$HOME/.dotnet"
+            echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+            export PATH="$HOME/.dotnet:$PATH"
+          fi
+
+          dotnet --info
+          dotnet --list-sdks | grep '^10\.'
 
       - name: Download Vintage Story 1.22.6 server assemblies
         shell: bash
@@ -39,11 +49,11 @@ jobs:
           find upstream/src -type f -name '*.cs' -print0 | xargs -0 sed -i 's/playerlist/holyguardstablist/g'
           mv upstream/resources/assets/playerlist upstream/resources/assets/holyguardstablist
 
-          cp buildsrc/standalone130/PlayerListHud.cs upstream/src/gui/PlayerListHud.cs
-          cp buildsrc/standalone130/GuiHolyguardsTable.cs upstream/src/gui/element/GuiHolyguardsTable.cs
+          cp "$GITHUB_WORKSPACE/source/buildsrc/standalone130/PlayerListHud.cs" upstream/src/gui/PlayerListHud.cs
+          cp "$GITHUB_WORKSPACE/source/buildsrc/standalone130/GuiHolyguardsTable.cs" upstream/src/gui/element/GuiHolyguardsTable.cs
 
           mkdir -p upstream/resources/assets/holyguardstablist/textures/gui
-          cp assets/PlayerLists_Holyguards_logo_300x200.png upstream/resources/assets/holyguardstablist/textures/gui/tablist.png
+          cp "$GITHUB_WORKSPACE/source/assets/PlayerLists_Holyguards_logo_300x200.png" upstream/resources/assets/holyguardstablist/textures/gui/tablist.png
           rm -f upstream/resources/assets/holyguardstablist/textures/vs_logo.png
 
           cat > upstream/resources/modinfo.json <<'JSON'
@@ -142,8 +152,20 @@ jobs:
           unzip -t holyguardstablist_1.3.0.zip
           sha256sum holyguardstablist_1.3.0.zip
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: holyguardstablist_1.3.0-final
-          path: holyguardstablist_1.3.0.zip
-          if-no-files-found: error
+      - name: Publish test ZIP
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          TAG='holyguardstablist-test'
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" holyguardstablist_1.3.0.zip --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" holyguardstablist_1.3.0.zip \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title 'Holyguards Tablist Test Build' \
+              --notes 'Automated test build for in-game testing.' \
+              --prerelease
+          fi
