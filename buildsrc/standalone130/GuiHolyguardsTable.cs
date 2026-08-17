@@ -33,7 +33,7 @@ public sealed class GuiHolyguardsTable : GuiElement {
             .ToList();
 
         // HeaderImage uses the element bounds when drawing, so the artwork is
-        // resized with the very same uniform scale used for the text below.
+        // resized with the same uniform layout scale used for the text positions.
         Bounds.fixedWidth = Width * _layoutScale;
         Bounds.fixedHeight = Height * _layoutScale;
         _background = new HeaderImage(mod, "holyguardstablist:textures/gui/tablist.png", Bounds);
@@ -43,31 +43,42 @@ public sealed class GuiHolyguardsTable : GuiElement {
         Bounds.CalcWorldBounds();
         _background.ComposeElements(ctx, surface);
 
-        // Keep names, rank, ping and row spacing locked to the original
-        // 720x480 design. Scaling the Cairo context also scales the fonts,
-        // instead of independently rounding every text size/coordinate.
-        ctx.Save();
-        try {
-            ctx.Translate(Bounds.drawX, Bounds.drawY);
-            ctx.Scale(_layoutScale, _layoutScale);
+        // Vintagestory's Cairo Context wrapper does not expose Context.Scale().
+        // Keep the approved 720x480 geometry responsive by scaling every authored
+        // coordinate before converting it to GUI pixels. At the canonical scale
+        // this is pixel-identical to the reference composition.
+        for (int i = 0; i < _players.Count; i++) {
+            PlayerData player = _players[i];
+            double y = Bounds.drawY + scaled((FirstRowY + i * RowHeight) * _layoutScale);
 
-            for (int i = 0; i < _players.Count; i++) {
-                PlayerData player = _players[i];
-                double y = scaled(FirstRowY + i * RowHeight);
+            CairoFont nameFont = player.Font;
+            nameFont.SetupContext(ctx);
+            _textUtil.DrawTextLine(
+                ctx,
+                player.Name,
+                nameFont,
+                Bounds.drawX + scaled(NameX * _layoutScale),
+                y
+            );
 
-                CairoFont nameFont = player.Font;
-                nameFont.SetupContext(ctx);
-                _textUtil.DrawTextLine(ctx, player.Name, nameFont, scaled(NameX), y);
+            CairoFont infoFont = Util.DefaultFont;
+            infoFont.SetupContext(ctx);
+            _textUtil.DrawTextLine(
+                ctx,
+                "Hráč",
+                infoFont,
+                Bounds.drawX + scaled(RankX * _layoutScale),
+                y
+            );
 
-                CairoFont infoFont = Util.DefaultFont;
-                infoFont.SetupContext(ctx);
-                _textUtil.DrawTextLine(ctx, "Hráč", infoFont, scaled(RankX), y);
-
-                string ping = player.Ping >= 0 ? $"{player.Ping} ms" : "—";
-                _textUtil.DrawTextLine(ctx, ping, infoFont, scaled(PingX), y);
-            }
-        } finally {
-            ctx.Restore();
+            string ping = player.Ping >= 0 ? $"{player.Ping} ms" : "—";
+            _textUtil.DrawTextLine(
+                ctx,
+                ping,
+                infoFont,
+                Bounds.drawX + scaled(PingX * _layoutScale),
+                y
+            );
         }
     }
 }
