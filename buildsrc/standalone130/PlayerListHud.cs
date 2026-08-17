@@ -1,4 +1,5 @@
 using holyguardstablist.gui.element;
+using holyguardstablist.util;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
