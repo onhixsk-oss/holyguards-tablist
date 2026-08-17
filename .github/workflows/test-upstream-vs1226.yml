@@ -1,0 +1,29 @@
+name: Test upstream PlayerList VS 1.22.6
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/test-upstream-vs1226.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Download VS 1.22.6 server
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir vs
+          curl -fL 'https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_1.22.6.tar.gz' -o vs.tar.gz
+          tar -xzf vs.tar.gz -C vs
+          test -f vs/VintagestoryAPI.dll
+      - name: Clone and build upstream unchanged
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/BillysArchive/VS-PlayerList.git upstream
+          dotnet build upstream/PlayerList.csproj -c Release -v:minimal -p:VINTAGE_STORY="$GITHUB_WORKSPACE/vs"
