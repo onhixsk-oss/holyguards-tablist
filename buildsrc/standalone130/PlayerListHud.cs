@@ -53,9 +53,6 @@ public sealed class PlayerListHud : HudElement {
     }
 
     private double GetLayoutScale() {
-        // FrameWidth/FrameHeight are physical framebuffer pixels, while
-        // ElementBounds/scaled() work in GUI units. Convert the viewport first
-        // and only shrink the canonical 720x480 design when it cannot fit.
         double guiScale = Math.Max(0.01, RuntimeEnv.GUIScale);
         double logicalWidth = capi.Render.FrameWidth / guiScale;
         double logicalHeight = capi.Render.FrameHeight / guiScale;
@@ -66,8 +63,6 @@ public sealed class PlayerListHud : HudElement {
         double widthScale = availableWidth / GuiHolyguardsTable.Width;
         double heightScale = availableHeight / GuiHolyguardsTable.Height;
 
-        // Never stretch the approved artwork. On large resolutions it stays at
-        // its canonical GUI size; on smaller ones it shrinks uniformly.
         return Math.Clamp(Math.Min(widthScale, heightScale), 0.1, 1.0);
     }
 
@@ -83,15 +78,16 @@ public sealed class PlayerListHud : HudElement {
             fixedHeight = GuiHolyguardsTable.Height * layoutScale
         };
 
+        // Add the custom element directly to the root composer. Calling
+        // BeginChildElements() here is invalid because no previous element exists,
+        // so GuiComposer would push a null parent bound and crash in AddStaticElement.
         SingleComposer = capi.Gui
             .CreateCompo("holyguardstablist", new ElementBounds {
                 Alignment = EnumDialogArea.CenterTop,
                 BothSizing = ElementSizing.FitToChildren,
                 fixedOffsetY = TopOffset * layoutScale
             })
-            .BeginChildElements()
             .AddStaticElement(new GuiHolyguardsTable(_mod, players, table, layoutScale))
-            .EndChildElements()
             .Compose();
     }
 
