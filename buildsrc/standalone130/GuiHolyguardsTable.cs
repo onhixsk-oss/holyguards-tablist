@@ -55,8 +55,8 @@ public sealed class GuiHolyguardsTable : GuiElement {
             nameFont.SetupContext(ctx);
             _textUtil.DrawTextLine(
                 ctx,
-                player.Name,
                 nameFont,
+                player.Name,
                 Bounds.drawX + scaled(NameX * _layoutScale),
                 y
             );
@@ -65,8 +65,8 @@ public sealed class GuiHolyguardsTable : GuiElement {
             infoFont.SetupContext(ctx);
             _textUtil.DrawTextLine(
                 ctx,
-                "Hráč",
                 infoFont,
+                "Hráč",
                 Bounds.drawX + scaled(RankX * _layoutScale),
                 y
             );
@@ -74,8 +74,8 @@ public sealed class GuiHolyguardsTable : GuiElement {
             string ping = player.Ping >= 0 ? $"{player.Ping} ms" : "—";
             _textUtil.DrawTextLine(
                 ctx,
-                ping,
                 infoFont,
+                ping,
                 Bounds.drawX + scaled(PingX * _layoutScale),
                 y
             );
