@@ -70,24 +70,35 @@ public sealed class PlayerListHud : HudElement {
         if (players.Count == 0) return;
 
         double layoutScale = GetLayoutScale();
+        double width = GuiHolyguardsTable.Width * layoutScale;
+        double height = GuiHolyguardsTable.Height * layoutScale;
 
-        ElementBounds table = new() {
+        // GuiComposer requires a real parent bounds object for child elements.
+        // The parent and the custom table bounds must be different instances;
+        // reusing one object would create a self-referencing bounds hierarchy.
+        ElementBounds content = new() {
             Alignment = EnumDialogArea.CenterTop,
             BothSizing = ElementSizing.Fixed,
-            fixedWidth = GuiHolyguardsTable.Width * layoutScale,
-            fixedHeight = GuiHolyguardsTable.Height * layoutScale
+            fixedWidth = width,
+            fixedHeight = height
         };
 
-        // Add the custom element directly to the root composer. Calling
-        // BeginChildElements() here is invalid because no previous element exists,
-        // so GuiComposer would push a null parent bound and crash in AddStaticElement.
+        ElementBounds table = new() {
+            Alignment = EnumDialogArea.LeftTop,
+            BothSizing = ElementSizing.Fixed,
+            fixedWidth = width,
+            fixedHeight = height
+        };
+
         SingleComposer = capi.Gui
             .CreateCompo("holyguardstablist", new ElementBounds {
                 Alignment = EnumDialogArea.CenterTop,
                 BothSizing = ElementSizing.FitToChildren,
                 fixedOffsetY = TopOffset * layoutScale
             })
+            .BeginChildElements(content)
             .AddStaticElement(new GuiHolyguardsTable(_mod, players, table, layoutScale))
+            .EndChildElements()
             .Compose();
     }
 
