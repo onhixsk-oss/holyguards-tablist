@@ -67,7 +67,7 @@ public sealed class GuiHolyguardsTable : GuiElement {
         Rectangle(ctx, patchX, patchY, patchW, patchH);
         ctx.Fill();
 
-        int maxPlayers = Math.Max(_players.Count, _mod.Config.MaxPlayers);
+        int maxPlayers = Math.Max(_players.Count, _mod.Config.MaxPlayers ?? _players.Count);
         string count = $"[{_players.Count}/{maxPlayers}]";
 
         CairoFont countFont = Util.DefaultFont.Clone()
