@@ -8,6 +8,7 @@ on:
       - '.github/workflows/build-holyguards-tablist-1.3.0-final.yml'
       - 'buildsrc/standalone130/**'
       - 'assets/PlayerLists_Holyguards_logo_300x200.png'
+      - 'assets/PlayerLists_Holyguards_alpha.png'
 
 permissions:
   contents: write
@@ -42,7 +43,25 @@ jobs:
           cp buildsrc/standalone130/PlayerListHud.cs upstream/src/gui/PlayerListHud.cs
           cp buildsrc/standalone130/GuiHolyguardsTable.cs upstream/src/gui/element/GuiHolyguardsTable.cs
           mkdir -p upstream/resources/assets/holyguardstablist/textures/gui
-          cp assets/PlayerLists_Holyguards_logo_300x200.png upstream/resources/assets/holyguardstablist/textures/gui/tablist.png
+
+          # Keep the ornate frame and Holyguards logo, but make the unwanted scenic
+          # background transparent.  The count and player-row dark overlays are still
+          # drawn dynamically by GuiHolyguardsTable.cs, exactly as requested.
+          python -m pip install --disable-pip-version-check pillow
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+
+          source = Image.open('assets/PlayerLists_Holyguards_logo_300x200.png').convert('RGBA')
+          alpha = Image.open('assets/PlayerLists_Holyguards_alpha.png').convert('L')
+          if source.size != alpha.size:
+              raise RuntimeError(f'Alpha mask size {alpha.size} does not match tablist {source.size}')
+          source.putalpha(alpha)
+          output = Path('upstream/resources/assets/holyguardstablist/textures/gui/tablist.png')
+          source.save(output, optimize=True)
+          print('Transparent tablist:', output, source.size)
+          PY
+
           rm -f upstream/resources/assets/holyguardstablist/textures/vs_logo.png
 
           cat > upstream/resources/modinfo.json <<'JSON'
@@ -105,10 +124,15 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
+          from PIL import Image
           m = json.loads(Path('package/modinfo.json').read_text())
           assert m['modid'] == 'holyguardstablist'
           assert m['version'] == '1.3.4'
           assert [p.name for p in Path('package').rglob('*.dll')] == ['HolyguardsTablist.dll']
+          tab = Image.open('package/assets/holyguardstablist/textures/gui/tablist.png').convert('RGBA')
+          amin, amax = tab.getchannel('A').getextrema()
+          assert amin == 0 and amax == 255, (amin, amax)
+          print('Transparent alpha OK:', (amin, amax))
           PY
 
           (cd package && zip -qr ../holyguardstablist_1.3.4_liveping.zip .)
