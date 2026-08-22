@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - skyblock-build-030
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
