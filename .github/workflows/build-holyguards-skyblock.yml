@@ -1,0 +1,34 @@
+name: Build Holyguards Skyblock DLL
+
+on:
+  push:
+    branches:
+      - skyblock-build-030
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet build skyblock-build/HolyguardsSkyblock/HolyguardsSkyblock.csproj -c Release
+
+      - name: Stage artifact
+        run: |
+          mkdir -p artifact
+          cp skyblock-build/HolyguardsSkyblock/bin/Release/net10.0/HolyguardsSkyblock.dll artifact/
+
+      - name: Upload DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: HolyguardsSkyblock-0.3.0-dll
+          path: artifact/HolyguardsSkyblock.dll
+          if-no-files-found: error
